@@ -1,0 +1,76 @@
+.timeline {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  overflow-x: auto;
+  padding: 24px 0;
+  position: relative;
+  min-height: 200px;
+  align-items: flex-start;
+}
+
+/* ponytail: horizontal line connecting all events */
+.timeline::before {
+  content: '';
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #333;
+  z-index: 0;
+}
+
+.eventCard {
+  position: relative;
+  z-index: 1;
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 180px;
+  max-width: 220px;
+  margin-right: 32px;
+  flex-shrink: 0;
+  transition: border-color 0.2s;
+}
+
+.eventCard:hover {
+  border-color: #6c5ce7;
+}
+
+.eventDot {
+  position: absolute;
+  top: -36px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #6c5ce7;
+  border: 2px solid #1a1a2e;
+  z-index: 2;
+}
+
+.eventChapter {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #6c5ce7;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  letter-spacing: 0.5px;
+}
+
+.eventLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+  margin: 0 0 4px 0;
+}
+
+.eventDesc {
+  font-size: 12px;
+  color: #888;
+  margin: 0;
+  line-height: 1.4;
+}

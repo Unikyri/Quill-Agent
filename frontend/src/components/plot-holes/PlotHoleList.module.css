@@ -1,0 +1,56 @@
+.listWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.cardDesc {
+  font-size: 14px;
+  color: #e0e0e0;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Severity badges */
+.severity {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.severityLow {
+  background: rgba(0, 184, 148, 0.15);
+  color: #00b894;
+}
+
+.severityMedium {
+  background: rgba(253, 203, 110, 0.15);
+  color: #fdcb6e;
+}
+
+.severityHigh {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
+}
+
+.severityCritical {
+  background: rgba(255, 107, 107, 0.25);
+  color: #ff4444;
+}
