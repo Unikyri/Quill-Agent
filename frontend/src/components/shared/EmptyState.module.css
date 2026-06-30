@@ -1,0 +1,44 @@
+.emptyCard {
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 40px 24px;
+  text-align: center;
+  max-width: 400px;
+  margin: 32px auto;
+}
+
+.icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: #e0e0e0;
+}
+
+.message {
+  font-size: 14px;
+  color: #888;
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.cta {
+  display: inline-block;
+  background: #6c5ce7;
+  color: white;
+  padding: 8px 20px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+}
+
+.cta:hover {
+  background: #5a4bd1;
+}

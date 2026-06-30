@@ -49,6 +49,7 @@ export const api = {
   // Works
   listWorks: (universeId: string) =>
     request<{ works: any[] }>(`/universes/${universeId}/works`),
+  getWork: (id: string) => request<{ work: any }>(`/works/${id}`),
   createWork: (universeId: string, data: any) =>
     request<{ work: any }>(`/universes/${universeId}/works`, { method: 'POST', json: data }),
 
@@ -69,4 +70,45 @@ export const api = {
 
   // Health
   health: () => request<any>('/health'),
+
+  // Phase 2a: Knowledge Graph & Analysis
+  getContradictions: (universeId: string) =>
+    request<{ contradictions: Array<{ id: string; message: string; severity: string; entities: string[] }> }>(
+      `/universes/${universeId}/contradictions`
+    ),
+
+  // ponytail: tolerates 404 — backend may not persist resolution yet; spec says local fallback
+  resolveContradiction: async (id: string): Promise<boolean> => {
+    const token = localStorage.getItem('token')
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(`${API_BASE}/contradictions/${id}/resolve`, {
+      method: 'PUT',
+      headers,
+    })
+    return res.ok || res.status === 404 // 404 = not persisted, but local fallback ok
+  },
+
+  getTimeline: (universeId: string) =>
+    request<{ events: Array<{ id: string; label: string; timestamp: string; description: string }> }>(
+      `/universes/${universeId}/timeline`
+    ),
+
+  getPlotHoles: (universeId: string) =>
+    request<{ plot_holes: Array<{ id: string; description: string; severity: string }> }>(
+      `/universes/${universeId}/plot-holes`
+    ),
+
+  getGraph: (universeId: string) =>
+    request<{
+      nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>
+      edges: Array<{ id: string; source: string; target: string; label: string }>
+    }>(`/universes/${universeId}/graph`),
+
+  recall: (universeId: string, query: string, k: number) =>
+    request<{ items: Array<{ id: string; fact: string; score: number; entity_id?: string }> }>(
+      `/universes/${universeId}/recall`,
+      { method: 'POST', json: { query, k } }
+    ),
 }
