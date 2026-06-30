@@ -105,6 +105,15 @@ type EntityFilters struct {
 	Limit        int
 }
 
+type ExtractedEntity struct {
+	Type        string                 `json:"type"`
+	Name        string                 `json:"name"`
+	Aliases     []string               `json:"aliases,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Properties  map[string]interface{} `json:"properties,omitempty"`
+	Status      string                 `json:"status,omitempty"`
+}
+
 func (r *EntityRepo) ListByUniverse(ctx context.Context, universeID uuid.UUID, filters EntityFilters) ([]models.Entity, int, error) {
 	where := []string{"universe_id = $1"}
 	args := []interface{}{universeID}

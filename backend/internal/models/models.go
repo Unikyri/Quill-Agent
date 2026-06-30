@@ -139,6 +139,12 @@ type IngestionJob struct {
 	CreatedAt              time.Time  `json:"created_at"`
 }
 
+type GraphNeighbor struct {
+	RelType  string `json:"rel_type"`
+	RelProps string `json:"rel_props"`
+	Node     string `json:"node"`
+}
+
 // API request/response types
 
 type RegisterRequest struct {

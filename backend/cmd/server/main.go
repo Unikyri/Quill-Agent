@@ -51,7 +51,6 @@ func main() {
 	chapterRepo := repositories.NewChapterRepo(pool)
 	entityRepo := repositories.NewEntityRepo(pool)
 	vectorRepo := repositories.NewVectorRepo(pool)
-	graphRepo := repositories.NewGraphRepo(pool)
 
 	// Initialize services
 	qwenSvc := services.NewQwenService(cfg)

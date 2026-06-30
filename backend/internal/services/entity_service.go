@@ -119,7 +119,7 @@ func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUI
 	// Step 3: Semantic similarity
 	embedding, err := s.qwenSvc.GenerateEmbedding(ctx, data.Name)
 	if err == nil {
-		similarID, distance, err := s.vectorRepo.FindSimilarEntity(ctx, universeID, embedding, 0.15)
+		similarID, _, err := s.vectorRepo.FindSimilarEntity(ctx, universeID, embedding, 0.15)
 		if err == nil && similarID != nil {
 			existing, err = s.entityRepo.FindByID(ctx, *similarID)
 			if err == nil {
