@@ -2,8 +2,6 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import LoginPage from '../LoginPage'
-import { useAuthStore } from '../../stores/authStore'
-
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')

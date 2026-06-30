@@ -235,3 +235,71 @@ type ErrorField struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
 }
+
+// --- WebSocket message types (Phase 2a) ---
+
+// WSMessage is the envelope for all WebSocket messages.
+type WSMessage struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// Client → Server payloads
+
+type AuthInitPayload struct {
+	Token string `json:"token"`
+}
+
+type ParagraphSubmitPayload struct {
+	WorkID     uuid.UUID `json:"work_id"`
+	ChapterID  uuid.UUID `json:"chapter_id"`
+	UniverseID uuid.UUID `json:"universe_id"`
+	Text       string    `json:"text"`
+}
+
+type RecallRequestPayload struct {
+	UniverseID uuid.UUID `json:"universe_id"`
+	Query      string    `json:"query"`
+	K          int       `json:"k"`
+}
+
+// Server → Client payloads
+
+type AnalysisResultPayload struct {
+	WorkID         uuid.UUID       `json:"work_id"`
+	ChapterID      uuid.UUID       `json:"chapter_id"`
+	Entities       []EntityBrief   `json:"entities"`
+	Contradictions []Contradiction `json:"contradictions"`
+	PlotHoles      []PlotHole      `json:"plot_holes"`
+}
+
+type EntityBrief struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	Type string    `json:"type"`
+}
+
+type ContradictionAlertPayload struct {
+	Contradiction Contradiction `json:"contradiction"`
+}
+
+type EntityDiscoveredPayload struct {
+	Entity Entity `json:"entity"`
+	IsNew  bool   `json:"is_new"`
+}
+
+type GraphUpdatedPayload struct {
+	UniverseID uuid.UUID `json:"universe_id"`
+	Action     string    `json:"action"`
+}
+
+type ContextualRecallPayload struct {
+	Items []RecallItem `json:"items"`
+}
+
+type RecallItem struct {
+	EntityID uuid.UUID `json:"entity_id"`
+	Fact     string    `json:"fact"`
+	Score    float64   `json:"score"`
+	Source   string    `json:"source"`
+}

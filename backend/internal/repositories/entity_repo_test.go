@@ -1,0 +1,165 @@
+package repositories
+
+import (
+	"context"
+	"math"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/quill/backend/internal/models"
+	"github.com/quill/backend/internal/testutil"
+)
+
+func setupEntityRepoFixtures(t *testing.T, pool *pgxpool.Pool) models.Universe {
+	t.Helper()
+	ctx := context.Background()
+	user := createTestUser(t, ctx, pool)
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Entity Test Universe", Format: "novel"}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "INSERT INTO universes (id, user_id, name, format) VALUES ($1,$2,$3,$4)",
+		universe.ID, universe.UserID, universe.Name, universe.Format); err != nil {
+		t.Fatalf("insert universe: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return universe
+}
+
+func createTestEntity(t *testing.T, pool *pgxpool.Pool, universeID uuid.UUID, name string, score float64, status string) models.Entity {
+	t.Helper()
+	ctx := context.Background()
+	e := models.Entity{ID: uuid.New(), UniverseID: universeID, Type: "character", Name: name, Status: status, RelevanceScore: score, Description: ""}
+	if _, err := pool.Exec(ctx, "INSERT INTO entities (id, universe_id, type, name, description, status, relevance_score) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+		e.ID, e.UniverseID, e.Type, e.Name, e.Description, e.Status, e.RelevanceScore); err != nil {
+		t.Fatalf("insert entity: %v", err)
+	}
+	return e
+}
+
+// TestDecayAll verifies the exponential decay: score *= e^(-lambda)
+func TestEntityRepoDecayAll(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "005") // entities table
+	universe := setupEntityRepoFixtures(t, pool)
+
+	e1 := createTestEntity(t, pool, universe.ID, "Entity A", 0.8, "active")
+	e2 := createTestEntity(t, pool, universe.ID, "Entity B", 0.5, "active")
+	_ = createTestEntity(t, pool, universe.ID, "Archived E", 0.1, "archived") // should NOT be decayed
+
+	ctx := context.Background()
+	repo := NewEntityRepo(pool)
+
+	lambda := 0.1
+	if err := repo.DecayAll(ctx, universe.ID, lambda); err != nil {
+		t.Fatalf("DecayAll: %v", err)
+	}
+
+	// Verify e1
+	found1, err := repo.FindByID(ctx, e1.ID)
+	if err != nil {
+		t.Fatalf("FindByID e1: %v", err)
+	}
+	expected1 := 0.8 * math.Exp(-lambda)
+	if math.Abs(found1.RelevanceScore-expected1) > 0.001 {
+		t.Errorf("e1 score = %f, want ~%f", found1.RelevanceScore, expected1)
+	}
+
+	// Verify e2
+	found2, err := repo.FindByID(ctx, e2.ID)
+	if err != nil {
+		t.Fatalf("FindByID e2: %v", err)
+	}
+	expected2 := 0.5 * math.Exp(-lambda)
+	if math.Abs(found2.RelevanceScore-expected2) > 0.001 {
+		t.Errorf("e2 score = %f, want ~%f", found2.RelevanceScore, expected2)
+	}
+}
+
+// TestTouchBatch verifies idle counter reset for multiple entities
+func TestEntityRepoTouchBatch(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "005")
+	universe := setupEntityRepoFixtures(t, pool)
+
+	e1 := createTestEntity(t, pool, universe.ID, "Touch A", 0.5, "active")
+	e2 := createTestEntity(t, pool, universe.ID, "Touch B", 0.3, "active")
+
+	ctx := context.Background()
+	repo := NewEntityRepo(pool)
+
+	chapterID := uuid.New()
+	if err := repo.TouchBatch(ctx, []uuid.UUID{e1.ID, e2.ID}, chapterID); err != nil {
+		t.Fatalf("TouchBatch: %v", err)
+	}
+
+	// Verify last_mentioned_chapter_id updated
+	found1, err := repo.FindByID(ctx, e1.ID)
+	if err != nil {
+		t.Fatalf("FindByID e1: %v", err)
+	}
+	if found1.LastMentionedChapterID == nil || *found1.LastMentionedChapterID != chapterID {
+		t.Errorf("e1 LastMentionedChapterID = %v, want %v", found1.LastMentionedChapterID, chapterID)
+	}
+	if found1.LastMentionedAt == nil {
+		t.Error("e1 LastMentionedAt should be set")
+	}
+
+	found2, err := repo.FindByID(ctx, e2.ID)
+	if err != nil {
+		t.Fatalf("FindByID e2: %v", err)
+	}
+	if found2.LastMentionedChapterID == nil || *found2.LastMentionedChapterID != chapterID {
+		t.Errorf("e2 LastMentionedChapterID = %v, want %v", found2.LastMentionedChapterID, chapterID)
+	}
+}
+
+// TestListByUniverseActive filters by status=active
+func TestEntityRepoListByUniverseActive(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "005")
+	universe := setupEntityRepoFixtures(t, pool)
+
+	createTestEntity(t, pool, universe.ID, "Active 1", 0.9, "active")
+	createTestEntity(t, pool, universe.ID, "Active 2", 0.7, "active")
+	createTestEntity(t, pool, universe.ID, "Archived", 0.1, "archived")
+
+	ctx := context.Background()
+	repo := NewEntityRepo(pool)
+
+	list, err := repo.ListByUniverseActive(ctx, universe.ID)
+	if err != nil {
+		t.Fatalf("ListByUniverseActive: %v", err)
+	}
+	if len(list) != 2 {
+		t.Errorf("ListByUniverseActive len = %d, want 2 (only active entities)", len(list))
+	}
+	for _, e := range list {
+		if e.Status != "active" {
+			t.Errorf("entity %s has status %q, want active", e.Name, e.Status)
+		}
+	}
+}
+
+// TestTouchBatchEmpty is safe with empty slice
+func TestEntityRepoTouchBatchEmpty(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "005")
+	_ = setupEntityRepoFixtures(t, pool)
+
+	ctx := context.Background()
+	repo := NewEntityRepo(pool)
+
+	// Should not error on empty slice
+	if err := repo.TouchBatch(ctx, []uuid.UUID{}, uuid.New()); err != nil {
+		t.Fatalf("TouchBatch empty: %v", err)
+	}
+}

@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/quill/backend/internal/config"
+	"github.com/quill/backend/internal/models"
 )
 
 type QwenService struct {
@@ -324,4 +327,105 @@ Return JSON array of relationships:
 	}
 
 	return relationships, nil
+}
+
+// ContradictionCandidate represents a potential contradiction to check.
+type ContradictionCandidate struct {
+	EntityID  uuid.UUID `json:"entity_id"`
+	Type      string    `json:"type"` // "deceased_alive", "status_change", "semantic"
+	EvidenceA string    `json:"evidence_a"`
+	EvidenceB string    `json:"evidence_b"`
+	ChapterA  uuid.UUID `json:"chapter_a"`
+	ChapterB  uuid.UUID `json:"chapter_b"`
+}
+
+// CheckContradictions sends a batch of candidates to Qwen-Max for semantic
+// contradiction detection. Limited to MaxContradictionCandidates per call.
+//
+// ponytail: batch call to Qwen-Max; single round-trip for up to 3 candidates.
+func (s *QwenService) CheckContradictions(ctx context.Context, candidates []ContradictionCandidate) ([]models.Contradiction, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Build prompt
+	prompt := fmt.Sprintf("You are a narrative contradiction detector. Analyze the following entity claims. Return JSON array:\n")
+	for i, c := range candidates {
+		prompt += fmt.Sprintf("Candidate %d [%s]: Evidence A: %s | Evidence B: %s\n", i, c.Type, c.EvidenceA, c.EvidenceB)
+	}
+	prompt += "\nReturn: [{\"has_contradiction\": true/false, \"entity_index\": int, \"description\": \"...\", \"severity\": \"low|medium|high\", \"suggestion\": \"...\"}]"
+
+	payload := QwenRequest{
+		Model: "qwen-max-latest",
+		Messages: []QwenMessage{
+			{Role: "system", Content: "You detect narrative contradictions. Return only JSON."},
+			{Role: "user", Content: prompt},
+		},
+	}
+
+	respBody, err := s.callWithSemaphore(ctx, s.maxSem, "qwen-max", payload)
+	if err != nil {
+		return nil, fmt.Errorf("check contradictions: %w", err)
+	}
+
+	var qwenResp QwenResponse
+	if err := json.Unmarshal(respBody, &qwenResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if len(qwenResp.Choices) == 0 {
+		return nil, fmt.Errorf("no choices in response")
+	}
+
+	content := qwenResp.Choices[0].Message.Content
+	var results []contradictionResult
+	if err := json.Unmarshal([]byte(content), &results); err != nil {
+		return nil, fmt.Errorf("unmarshal results: %w", err)
+	}
+
+	var contradictions []models.Contradiction
+	for _, r := range results {
+		if !r.HasContradiction {
+			continue
+		}
+		if r.EntityIndex < 0 || r.EntityIndex >= len(candidates) {
+			continue
+		}
+		c := candidates[r.EntityIndex]
+		contra := models.Contradiction{
+			ID:                 uuid.Nil,
+			UniverseID:         uuid.Nil, // caller must set
+			EntityID:           &c.EntityID,
+			Severity:           r.Severity,
+			Description:        r.Description,
+			Suggestion:         r.Suggestion,
+			EvidenceA:          c.EvidenceA,
+			EvidenceAChapterID: &c.ChapterA,
+			EvidenceB:          c.EvidenceB,
+			EvidenceBChapterID: &c.ChapterB,
+			Status:             "open",
+		}
+		contradictions = append(contradictions, contra)
+	}
+
+	return contradictions, nil
+}
+
+// contradictionResult mirrors Qwen's JSON response per candidate.
+type contradictionResult struct {
+	HasContradiction bool   `json:"has_contradiction"`
+	EntityIndex      int    `json:"entity_index"`
+	Description      string `json:"description"`
+	Severity         string `json:"severity"`
+	Suggestion       string `json:"suggestion"`
+}
+
+// parseContradictionResults decodes the Qwen response JSON into contradiction results.
+// Exported for testing.
+func parseContradictionResults(raw []byte, candidates []ContradictionCandidate) ([]contradictionResult, error) {
+	var results []contradictionResult
+	if err := json.Unmarshal(raw, &results); err != nil {
+		return nil, err
+	}
+	return results, nil
 }

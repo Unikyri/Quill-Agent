@@ -37,6 +37,18 @@ func SetupTestDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// CheckAGE returns true if the Apache AGE extension is loaded (cypher function exists).
+func CheckAGE(t *testing.T, pool *pgxpool.Pool) bool {
+	t.Helper()
+	var exists bool
+	if err := pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = 'cypher')`,
+	).Scan(&exists); err != nil {
+		t.Fatalf("check for cypher function: %v", err)
+	}
+	return exists
+}
+
 func RunMigrationsUpTo(t *testing.T, pool *pgxpool.Pool, maxPrefix string) {
 	t.Helper()
 
@@ -64,19 +76,30 @@ func RunMigrationsUpTo(t *testing.T, pool *pgxpool.Pool, maxPrefix string) {
 	sort.Strings(downFiles)
 
 	// Reset state by tearing down all known migrations in reverse order.
+	// Down migrations silently ignore errors — the DB may not have the state yet.
 	for i := len(downFiles) - 1; i >= 0; i-- {
 		sql, err := os.ReadFile(downFiles[i])
 		if err != nil {
 			t.Fatalf("read down migration %s: %v", downFiles[i], err)
 		}
-		// Ignore errors; tables may not exist yet.
 		_, _ = pool.Exec(ctx, string(sql))
 	}
+
+	// ponytail: check AGE once before the up-migration loop
+	ageAvailable := CheckAGE(t, pool)
 
 	for _, f := range upFiles {
 		if maxPrefix != "" && !strings.HasPrefix(filepath.Base(f), maxPrefix) && filepath.Base(f) > maxPrefix {
 			continue
 		}
+
+		// Migration 014 requires Apache AGE (cypher function) for graph population.
+		// Skip it when AGE is not available on the test DB.
+		if !ageAvailable && strings.HasPrefix(filepath.Base(f), "014") {
+			t.Log("skipping migration 014: Apache AGE extension not available (cypher function missing)")
+			continue
+		}
+
 		sql, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatalf("read migration %s: %v", f, err)

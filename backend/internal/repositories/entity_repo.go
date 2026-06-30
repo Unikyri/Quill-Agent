@@ -261,6 +261,68 @@ func (r *EntityRepo) GetMaxMentionsInUniverse(ctx context.Context, universeID uu
 	return max, nil
 }
 
+// DecayAll applies exponential decay to all active entities in the universe.
+// score = score * e^(-lambda). Archived entities are skipped.
+func (r *EntityRepo) DecayAll(ctx context.Context, universeID uuid.UUID, lambda float64) error {
+	// ponytail: per-chapter decay, multiply by e^(-lambda) each chapter advance
+	query := `
+		UPDATE entities SET relevance_score = relevance_score * EXP($2), updated_at = NOW()
+		WHERE universe_id = $1 AND status = 'active'
+	`
+	_, err := r.pool.Exec(ctx, query, universeID, -lambda)
+	if err != nil {
+		return fmt.Errorf("decay all: %w", err)
+	}
+	return nil
+}
+
+// TouchBatch resets the idle counter for multiple entities by updating
+// last_mentioned_chapter_id and last_mentioned_at for each entity ID.
+func (r *EntityRepo) TouchBatch(ctx context.Context, entityIDs []uuid.UUID, chapterID uuid.UUID) error {
+	if len(entityIDs) == 0 {
+		return nil
+	}
+
+	query := `
+		UPDATE entities SET last_mentioned_chapter_id = $2, last_mentioned_at = NOW(), updated_at = NOW()
+		WHERE id = ANY($1)
+	`
+	_, err := r.pool.Exec(ctx, query, entityIDs, chapterID)
+	if err != nil {
+		return fmt.Errorf("touch batch: %w", err)
+	}
+	return nil
+}
+
+// ListByUniverseActive returns all active entities for a universe ordered by relevance.
+func (r *EntityRepo) ListByUniverseActive(ctx context.Context, universeID uuid.UUID) ([]models.Entity, error) {
+	query := `
+		SELECT id, universe_id, type, name, aliases, description, properties, status, relevance_score,
+		       last_mentioned_chapter_id, last_mentioned_at, created_at, updated_at
+		FROM entities WHERE universe_id = $1 AND status = 'active'
+		ORDER BY relevance_score DESC
+	`
+	rows, err := r.pool.Query(ctx, query, universeID)
+	if err != nil {
+		return nil, fmt.Errorf("list active entities: %w", err)
+	}
+	defer rows.Close()
+
+	var entities []models.Entity
+	for rows.Next() {
+		var e models.Entity
+		if err := rows.Scan(
+			&e.ID, &e.UniverseID, &e.Type, &e.Name, &e.Aliases, &e.Description,
+			&e.Properties, &e.Status, &e.RelevanceScore, &e.LastMentionedChapterID,
+			&e.LastMentionedAt, &e.CreatedAt, &e.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan entity: %w", err)
+		}
+		entities = append(entities, e)
+	}
+	return entities, nil
+}
+
 func (r *EntityRepo) MergeProperties(existing json.RawMessage, newData json.RawMessage) json.RawMessage {
 	if existing == nil {
 		return newData

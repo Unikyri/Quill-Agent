@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import KnowledgeGraphPage from '../KnowledgeGraphPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
 import { useGraphStore } from '../../stores/graphStore'
+
+// Mutable box for wsStore graphPings — reassign .value to simulate new pings
+const { pingBox } = vi.hoisted(() => {
+  const box: { value: Array<Record<string, unknown>> } = { value: [] }
+  return { pingBox: box }
+})
 
 // Mock api
 const mockGetGraph = vi.fn()
@@ -13,9 +19,13 @@ vi.mock('../../lib/api', () => ({
   },
 }))
 
-// Mock wsStore
+// Mock wsStore — reads pingBox.value so reassigning it gives a new reference.
+// Must apply the Zustand selector so `useWSStore(s => s.graphPings)` returns the array, not the wrapper object.
 vi.mock('../../stores/wsStore', () => ({
-  useWSStore: () => ({ graphPings: [] }),
+  useWSStore: (selector: unknown) => {
+    const state = { graphPings: pingBox.value }
+    return typeof selector === 'function' ? (selector as (s: typeof state) => unknown)(state) : state
+  },
 }))
 
 const defaultContext = {
@@ -37,6 +47,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  pingBox.value = [] // start each test with no pings
   useGraphStore.setState({
     nodes: [],
     edges: [],
@@ -97,6 +108,34 @@ describe('KnowledgeGraphPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Retry')).toBeInTheDocument()
+    })
+  })
+
+  it('calls refresh when WS graph_updated ping arrives via wsStore', async () => {
+    mockGetGraph.mockResolvedValue({
+      nodes: [{ id: 'n1', type: 'character', position: { x: 0, y: 0 }, data: { label: 'Alice' } }],
+      edges: [],
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('character')).toBeInTheDocument()
+    })
+    // fetchGraph called once during load
+    expect(mockGetGraph).toHaveBeenCalledTimes(1)
+
+    // Simulate WS ping: assign a new array so effect dependency reference changes
+    pingBox.value = [{ type: 'graph_updated' }]
+
+    // Trigger re-render without unmounting: produce a new nodes reference
+    const { nodes } = useGraphStore.getState()
+    act(() => {
+      useGraphStore.setState({ nodes: [...nodes] })
+    })
+
+    // refresh() calls api.getGraph internally — should now be called twice
+    await waitFor(() => {
+      expect(mockGetGraph).toHaveBeenCalledTimes(2)
     })
   })
 })

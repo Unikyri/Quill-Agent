@@ -29,6 +29,11 @@ type Config struct {
 	QwenMaxConcurrency   int
 	QwenTurboConcurrency int
 	QwenHealthTimeout    time.Duration
+	DecayLambda              float64
+	ArchiveThreshold         float64
+	PlotHoleChapters         int
+	MaxContradictionCandidates int
+	WSEnabled                bool
 }
 
 func Load() (*Config, error) {
@@ -53,7 +58,12 @@ func Load() (*Config, error) {
 		DebounceSeconds:      getEnvInt("DEBOUNCE_SECONDS", 5),
 		QwenMaxConcurrency:   getEnvInt("QWEN_MAX_CONCURRENCY", 3),
 		QwenTurboConcurrency: getEnvInt("QWEN_TURBO_CONCURRENCY", 5),
-		QwenHealthTimeout:    time.Duration(getEnvInt("QWEN_HEALTH_TIMEOUT_SECONDS", 5)) * time.Second,
+		QwenHealthTimeout:         time.Duration(getEnvInt("QWEN_HEALTH_TIMEOUT_SECONDS", 5)) * time.Second,
+		DecayLambda:               getEnvFloat("DECAY_LAMBDA", 0.1),
+		ArchiveThreshold:          getEnvFloat("ARCHIVE_THRESHOLD", 0.15),
+		PlotHoleChapters:          getEnvInt("PLOT_HOLE_CHAPTERS", 8),
+		MaxContradictionCandidates: getEnvInt("MAX_CONTRADICTION_CANDIDATES", 3),
+		WSEnabled:                 getEnvBool("QUILL_WS_ENABLED", true),
 	}
 
 	if cfg.QwenAPIKey == "" {
@@ -74,6 +84,24 @@ func getEnvInt(key string, fallback int) int {
 	if val := os.Getenv(key); val != "" {
 		if i, err := strconv.Atoi(val); err == nil {
 			return i
+		}
+	}
+	return fallback
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	if val := os.Getenv(key); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if val := os.Getenv(key); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			return b
 		}
 	}
 	return fallback

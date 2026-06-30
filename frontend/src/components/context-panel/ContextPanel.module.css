@@ -1,0 +1,136 @@
+.panel {
+  width: 320px;
+  border-left: 1px solid #333;
+  padding: 16px;
+  overflow-y: auto;
+  background: #16213e;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.panelTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.statusIndicator {
+  font-size: 12px;
+}
+
+.cardCount {
+  font-size: 12px;
+  color: #888;
+}
+
+.cardList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Card */
+.card {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 12px;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.cardFading {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.cardDanger {
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+.cardInfo {
+  border-color: rgba(108, 92, 231, 0.3);
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.cardTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dismissBtn {
+  background: transparent;
+  border: none;
+  color: #555;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.dismissBtn:hover {
+  color: #ff6b6b;
+}
+
+.cardDetail {
+  font-size: 13px;
+  color: #aaa;
+  margin: 0 0 6px 0;
+  line-height: 1.5;
+}
+
+.cardFooter {
+  display: flex;
+  gap: 6px;
+}
+
+/* Badges */
+.badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badgeNew {
+  background: #6c5ce7;
+  color: white;
+}
+
+.severityLow {
+  background: rgba(0, 184, 148, 0.2);
+  color: #00b894;
+}
+
+.severityMedium {
+  background: rgba(253, 203, 110, 0.2);
+  color: #fdcb6e;
+}
+
+.severityHigh {
+  background: rgba(255, 107, 107, 0.2);
+  color: #ff6b6b;
+}
+
+/* Empty state */
+.emptyState {
+  color: #555;
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 16px;
+  line-height: 1.5;
+}

@@ -1,0 +1,54 @@
+-- Migration 014: Down — Remove seeded demo saga data
+-- Deletes all data seeded in 014_seed_demo_saga.up.sql by template universe FK.
+-- Template universe row and demo user are preserved (owned by migration 013).
+
+-- AGE graph cleanup: delete all vertices and edges for the template graph
+SELECT * FROM cypher('universe_00000000-0000-0000-0000-000000000002',
+    $$ MATCH (n) DETACH DELETE n $$)
+AS (a agtype);
+
+-- Delete in FK-dependent order (reverse of seed)
+
+DELETE FROM timeline_events
+WHERE universe_id = '00000000-0000-0000-0000-000000000002'
+  AND id >= '00000000-0000-0000-0000-000000000400'
+  AND id <= '00000000-0000-0000-0000-000000000407';
+
+DELETE FROM plot_holes
+WHERE universe_id = '00000000-0000-0000-0000-000000000002'
+  AND id >= '00000000-0000-0000-0000-000000000500'
+  AND id <= '00000000-0000-0000-0000-000000000503';
+
+DELETE FROM contradictions
+WHERE universe_id = '00000000-0000-0000-0000-000000000002'
+  AND id >= '00000000-0000-0000-0000-000000000300'
+  AND id <= '00000000-0000-0000-0000-000000000305';
+
+DELETE FROM entity_embeddings
+WHERE entity_id IN (
+    SELECT id FROM entities
+    WHERE universe_id = '00000000-0000-0000-0000-000000000002'
+      AND id >= '00000000-0000-0000-0000-000000000100'
+      AND id <= '00000000-0000-0000-0000-000000000142'
+);
+
+DELETE FROM entity_mentions
+WHERE id >= '00000000-0000-0000-0000-000000000200'
+  AND id <= '00000000-0000-0000-0000-000000000237';
+
+DELETE FROM entities
+WHERE universe_id = '00000000-0000-0000-0000-000000000002'
+  AND id >= '00000000-0000-0000-0000-000000000100'
+  AND id <= '00000000-0000-0000-0000-000000000142';
+
+DELETE FROM chapters
+WHERE work_id IN (
+    '00000000-0000-0000-0000-000000000010',
+    '00000000-0000-0000-0000-000000000011',
+    '00000000-0000-0000-0000-000000000012'
+);
+
+DELETE FROM works
+WHERE universe_id = '00000000-0000-0000-0000-000000000002'
+  AND id >= '00000000-0000-0000-0000-000000000010'
+  AND id <= '00000000-0000-0000-0000-000000000012';

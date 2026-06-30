@@ -1,0 +1,48 @@
+.wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editorContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.editorContent :global(.ProseMirror) {
+  outline: none;
+  min-height: 100%;
+  font-size: 16px;
+  line-height: 1.8;
+  color: #e0e0e0;
+}
+
+.editorContent :global(.ProseMirror p) {
+  margin: 0 0 0.5em 0;
+}
+
+.editorContent :global(.ProseMirror p.is-editor-empty:first-child::before) {
+  content: attr(data-placeholder);
+  float: left;
+  color: #555;
+  pointer-events: none;
+  height: 0;
+}
+
+.editorContent :global(.ProseMirror a) {
+  color: #6c5ce7;
+  text-decoration: underline;
+}
+
+.editorContent :global(.ProseMirror mark) {
+  background: rgba(108, 92, 231, 0.3);
+  color: #e0e0e0;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.editorContent :global(.ProseMirror u) {
+  text-decoration: underline;
+}
