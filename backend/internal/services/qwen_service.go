@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/quill/backend/internal/config"
@@ -22,12 +23,35 @@ type QwenService struct {
 
 func NewQwenService(cfg *config.Config) *QwenService {
 	return &QwenService{
-		client: &http.Client{Timeout: 30 * time.Second},
-		baseURL: cfg.QwenBaseURL,
-		apiKey: cfg.QwenAPIKey,
-		maxSem: make(chan struct{}, cfg.QwenMaxConcurrency),
+		client:   &http.Client{Timeout: 30 * time.Second},
+		baseURL:  cfg.QwenBaseURL,
+		apiKey:   cfg.QwenAPIKey,
+		maxSem:   make(chan struct{}, cfg.QwenMaxConcurrency),
 		turboSem: make(chan struct{}, cfg.QwenTurboConcurrency),
 	}
+}
+
+// HealthCheck performs a lightweight reachability check against the Qwen API.
+// Any response that is not a server error is treated as reachable; network
+// failures or 5xx responses are reported as unreachable by the caller.
+func (s *QwenService) HealthCheck(ctx context.Context) error {
+	url := strings.TrimRight(s.baseURL, "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create health request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.apiKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("call qwen api: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return fmt.Errorf("qwen api returned status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 type QwenRequest struct {
@@ -141,20 +165,20 @@ func (s *QwenService) callEmbedding(ctx context.Context, payload interface{}) ([
 }
 
 type ExtractedEntity struct {
-	Name        string            `json:"name"`
-	Aliases     []string          `json:"aliases"`
-	Type        string            `json:"type"`
-	Status      string            `json:"status"`
-	Description string            `json:"description"`
+	Name        string                 `json:"name"`
+	Aliases     []string               `json:"aliases"`
+	Type        string                 `json:"type"`
+	Status      string                 `json:"status"`
+	Description string                 `json:"description"`
 	Properties  map[string]interface{} `json:"properties"`
 }
 
 type ExtractedEntities struct {
-	Characters     []ExtractedEntity `json:"characters"`
-	Places         []ExtractedEntity `json:"places"`
-	Events         []ExtractedEntity `json:"events"`
-	Factions       []ExtractedEntity `json:"factions"`
-	WorldRules     []ExtractedEntity `json:"world_rules"`
+	Characters       []ExtractedEntity `json:"characters"`
+	Places           []ExtractedEntity `json:"places"`
+	Events           []ExtractedEntity `json:"events"`
+	Factions         []ExtractedEntity `json:"factions"`
+	WorldRules       []ExtractedEntity `json:"world_rules"`
 	PlotDevelopments []ExtractedEntity `json:"plot_developments"`
 }
 

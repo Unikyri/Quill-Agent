@@ -67,7 +67,7 @@ func main() {
 	workH := handlers.NewWorkHandler(workSvc)
 	chapterH := handlers.NewChapterHandler(chapterSvc)
 	entityH := handlers.NewEntityHandler(entitySvc)
-	healthH := handlers.NewHealthHandler(pool, qwenSvc)
+	healthH := handlers.NewHealthHandler(pool, qwenSvc, cfg)
 	demoH := handlers.NewDemoHandler(demoSvc)
 
 	// Create Fiber app

@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/quill/backend/internal/config"
 	"github.com/quill/backend/internal/testutil"
 )
 
@@ -17,7 +19,8 @@ func TestHealthHandlerCheck(t *testing.T) {
 
 	app := fiber.New()
 	// QwenService is not required for the fields returned by Check.
-	h := NewHealthHandler(pool, nil)
+	cfg := &config.Config{QwenHealthTimeout: 5 * time.Second}
+	h := NewHealthHandler(pool, nil, cfg)
 	app.Get("/api/v1/health", h.Check)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
