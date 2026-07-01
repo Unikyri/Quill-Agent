@@ -4,6 +4,9 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import PlotHolesPage from '../PlotHolesPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
 
+// CSS module mock
+vi.mock('../PlotHolesPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
+
 // Mock api
 const mockGetPlotHoles = vi.fn()
 vi.mock('../../lib/api', () => ({

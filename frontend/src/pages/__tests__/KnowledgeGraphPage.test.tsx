@@ -5,6 +5,9 @@ import KnowledgeGraphPage from '../KnowledgeGraphPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
 import { useGraphStore } from '../../stores/graphStore'
 
+// CSS module mock
+vi.mock('../KnowledgeGraphPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
+
 // Mutable box for wsStore graphPings — reassign .value to simulate new pings
 const { pingBox } = vi.hoisted(() => {
   const box: { value: Array<Record<string, unknown>> } = { value: [] }

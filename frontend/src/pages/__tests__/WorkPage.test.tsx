@@ -3,6 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import WorkPage from '../WorkPage'
 
+// CSS module mock
+vi.mock('../WorkPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
+
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')

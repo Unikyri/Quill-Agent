@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import UniverseLayout from '../UniverseLayout'
 
+// CSS module mock
+vi.mock('../UniverseLayout.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
+
 // Mock api
 const mockGetUniverse = vi.fn()
 const mockListWorks = vi.fn()
@@ -66,10 +69,12 @@ describe('UniverseLayout', () => {
   it('renders universe name and 5 tabs after load', async () => {
     renderLayout()
 
+    // Universe name appears in both breadcrumb and heading — use getAllByText
     await waitFor(() => {
-      expect(screen.getByText('Middle Earth')).toBeInTheDocument()
+      expect(screen.getAllByText('Middle Earth').length).toBeGreaterThanOrEqual(1)
     })
 
+    expect(screen.getByRole('heading', { name: 'Middle Earth' })).toBeInTheDocument()
     expect(screen.getByText('Fantasy · Novel Series')).toBeInTheDocument()
     expect(screen.getByText('Works')).toBeInTheDocument()
     expect(screen.getByText('Graph')).toBeInTheDocument()

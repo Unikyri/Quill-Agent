@@ -5,6 +5,9 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ContradictionsPage from '../ContradictionsPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
 
+// CSS module mock
+vi.mock('../ContradictionsPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
+
 // Mock api
 const mockGetContradictions = vi.fn()
 const mockResolveContradiction = vi.fn()
