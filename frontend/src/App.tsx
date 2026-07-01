@@ -14,6 +14,7 @@ import WorkPage from './pages/WorkPage'
 
 // ponytail: lazy-loaded — GSAP stays in this chunk, not the main bundle
 const LandingPage = lazy(() => import('./pages/LandingPage'))
+const EntityCardPage = lazy(() => import('./pages/EntityCardPage'))
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -38,6 +39,7 @@ export default function App() {
         </Route>
         <Route path="/work/:workId" element={<ProtectedRoute><WorkPage /></ProtectedRoute>} />
         <Route path="/editor/:chapterId" element={<ProtectedRoute><EditorPage /></ProtectedRoute>} />
+        <Route path="/entity/:entityId" element={<ProtectedRoute><EntityCardPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
       </Suspense>

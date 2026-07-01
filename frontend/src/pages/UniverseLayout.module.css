@@ -1,0 +1,140 @@
+/* UniverseLayout — breadcrumb navbar + manuscript tab bar */
+
+.wrap {
+  min-height: 100vh;
+  background: var(--paper-warm);
+}
+
+/* Top navbar with breadcrumb */
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--ink-10);
+}
+
+.backBtn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  color: var(--ink-60);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.backBtn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.breadcrumb {
+  font-family: var(--micro);
+  font-size: 13px;
+  color: var(--ink-40);
+  font-style: italic;
+}
+
+.breadcrumbSep {
+  margin: 0 4px;
+  color: var(--ink-20);
+}
+
+.breadcrumbCurrent {
+  color: var(--ink-60);
+}
+
+/* Universe header */
+.header {
+  padding: 24px 32px 0;
+}
+
+.heading {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.meta {
+  font-family: var(--micro);
+  font-size: 14px;
+  color: var(--ink-60);
+  font-style: italic;
+  margin: 0;
+}
+
+/* Tab bar */
+.tabBar {
+  display: flex;
+  gap: 0;
+  margin: 20px 32px 0;
+  border-bottom: 1px solid var(--ink-20);
+}
+
+.tab {
+  padding: 10px 20px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-40);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.tab:hover {
+  color: var(--ink-60);
+}
+
+.tabActive {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* Content area */
+.content {
+  padding: 24px 32px;
+}
+
+/* Loading / Error states */
+.stateWrap {
+  padding: 48px 32px;
+  text-align: center;
+}
+
+.stateText {
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--ink-60);
+  font-style: italic;
+}
+
+.stateBtn {
+  margin-top: 16px;
+  padding: 10px 24px;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.stateBtn:hover {
+  background: var(--ink-80);
+}

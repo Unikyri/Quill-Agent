@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Outlet, NavLink } from 'react-router-dom'
 import { UniverseContext, type UniverseContextValue } from '../contexts/UniverseContext'
 import { api } from '../lib/api'
+import styles from './UniverseLayout.module.css'
 
-// ponytail: re-fetches universe on mount instead of sharing universeStore;
-// universeStore is already populated by DashboardPage, but self-contained layout handles direct nav
 export default function UniverseLayout() {
   const { universeId } = useParams<{ universeId: string }>()
   const navigate = useNavigate()
@@ -29,17 +28,17 @@ export default function UniverseLayout() {
 
   if (loading) {
     return (
-      <div style={{ padding: 24 }}>
-        <p style={{ color: '#888' }}>Loading universe…</p>
+      <div className={styles.stateWrap}>
+        <p className={styles.stateText}>Loading universe…</p>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div style={{ padding: 24 }}>
-        <p className="error">Failed to load universe: {error}</p>
-        <button className="primary" onClick={() => navigate('/dashboard')}>
+      <div className={styles.stateWrap}>
+        <p className={styles.stateText}>Failed to load universe: {error}</p>
+        <button className={styles.stateBtn} onClick={() => navigate('/dashboard')}>
           Back to Dashboard
         </button>
       </div>
@@ -56,41 +55,42 @@ export default function UniverseLayout() {
 
   return (
     <UniverseContext.Provider value={ctx}>
-      <div style={{ padding: 24 }}>
-        <button
-          onClick={() => navigate('/dashboard')}
-          style={{ background: 'transparent', color: '#6c5ce7', marginBottom: 16 }}
-        >
-          ← Back to Dashboard
-        </button>
+      <div className={styles.wrap}>
+        <nav className={styles.navbar}>
+          <button className={styles.backBtn} onClick={() => navigate('/dashboard')}>
+            ← Back to Dashboard
+          </button>
+          <span className={styles.breadcrumb}>
+            <span className={styles.breadcrumbSep}>/</span>
+            <span className={styles.breadcrumbCurrent}>{ctx.universe?.name || 'Universe'}</span>
+          </span>
+        </nav>
 
-        <h1>{ctx.universe?.name || 'Universe'}</h1>
-        <p style={{ color: '#888', marginBottom: 16 }}>
-          {ctx.universe?.genre} · {ctx.universe?.format}
-        </p>
+        <div className={styles.header}>
+          <h1 className={styles.heading}>{ctx.universe?.name || 'Universe'}</h1>
+          <p className={styles.meta}>
+            {ctx.universe?.genre} · {ctx.universe?.format}
+          </p>
+        </div>
 
-        {/* Tab bar */}
-        <nav style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid #333', paddingBottom: 8 }}>
+        <nav className={styles.tabBar}>
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}
               to={tab.to}
               end
-              style={({ isActive }) => ({
-                padding: '6px 16px',
-                borderRadius: '6px 6px 0 0',
-                color: isActive ? '#6c5ce7' : '#888',
-                background: isActive ? '#16213e' : 'transparent',
-                textDecoration: 'none',
-                fontSize: 14,
-              })}
+              className={({ isActive }) =>
+                `${styles.tab} ${isActive ? styles.tabActive : ''}`
+              }
             >
               {tab.label}
             </NavLink>
           ))}
         </nav>
 
-        <Outlet />
+        <div className={styles.content}>
+          <Outlet />
+        </div>
       </div>
     </UniverseContext.Provider>
   )

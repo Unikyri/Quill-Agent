@@ -5,6 +5,7 @@ import { UniverseContext } from '../contexts/UniverseContext'
 import ContradictionList, { type Contradiction } from '../components/contradictions/ContradictionList'
 import PageStatus from '../components/shared/PageStatus'
 import EmptyState from '../components/shared/EmptyState'
+import styles from './ContradictionsPage.module.css'
 
 export default function ContradictionsPage() {
   const { universeId } = useParams<{ universeId: string }>()
@@ -19,7 +20,7 @@ export default function ContradictionsPage() {
     setError(null)
     api.getContradictions(universeId)
       .then(({ contradictions: raw }) => {
-        setContradictions(raw)
+        setContradictions(raw || [])
         setLoading(false)
       })
       .catch((err) => {
@@ -38,7 +39,7 @@ export default function ContradictionsPage() {
   if (contradictions.length === 0) {
     return (
       <EmptyState
-        icon="⚖️"
+        icon="\u{2696}"
         title="No Contradictions"
         message="No contradictions detected in your universe. AI analysis scans entities and plot events for inconsistencies — run an analysis to check for plot holes."
         cta={universe ? `Analyze "${universe.name}"` : undefined}
@@ -46,5 +47,11 @@ export default function ContradictionsPage() {
     )
   }
 
-  return <ContradictionList contradictions={contradictions} />
+  return (
+    <div className={styles.wrap}>
+      <div className={styles.listArea}>
+        <ContradictionList contradictions={contradictions} />
+      </div>
+    </div>
+  )
 }

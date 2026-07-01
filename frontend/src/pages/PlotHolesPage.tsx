@@ -5,6 +5,7 @@ import { UniverseContext } from '../contexts/UniverseContext'
 import PlotHoleList, { type PlotHole } from '../components/plot-holes/PlotHoleList'
 import PageStatus from '../components/shared/PageStatus'
 import EmptyState from '../components/shared/EmptyState'
+import styles from './PlotHolesPage.module.css'
 
 export default function PlotHolesPage() {
   const { universeId } = useParams<{ universeId: string }>()
@@ -19,7 +20,7 @@ export default function PlotHolesPage() {
     setError(null)
     api.getPlotHoles(universeId)
       .then(({ plot_holes }) => {
-        setPlotHoles(plot_holes)
+        setPlotHoles(plot_holes || [])
         setLoading(false)
       })
       .catch((err) => {
@@ -38,7 +39,7 @@ export default function PlotHolesPage() {
   if (plotHoles.length === 0) {
     return (
       <EmptyState
-        icon="🕳️"
+        icon="\u{1F573}"
         title="No Plot Holes"
         message="No plot holes detected. AI analysis scans your works for narrative gaps, inconsistencies, and unresolved threads."
         cta={universe ? `Analyze "${universe.name}"` : undefined}
@@ -46,5 +47,11 @@ export default function PlotHolesPage() {
     )
   }
 
-  return <PlotHoleList plotHoles={plotHoles} />
+  return (
+    <div className={styles.wrap}>
+      <div className={styles.listArea}>
+        <PlotHoleList plotHoles={plotHoles} />
+      </div>
+    </div>
+  )
 }

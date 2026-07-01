@@ -80,6 +80,7 @@ export const api = {
     const query = params ? '?' + new URLSearchParams(params).toString() : ''
     return request<{ entities: any[]; pagination: any }>(`/universes/${universeId}/entities${query}`)
   },
+  getEntity: (id: string) => request<{ entity: any }>(`/entities/${id}`),
 
   // Health
   health: () => request<any>('/health'),

@@ -5,6 +5,7 @@ import { UniverseContext } from '../contexts/UniverseContext'
 import TimelineView, { type TimelineEvent } from '../components/timeline/TimelineView'
 import PageStatus from '../components/shared/PageStatus'
 import EmptyState from '../components/shared/EmptyState'
+import styles from './TimelinePage.module.css'
 
 export default function TimelinePage() {
   const { universeId } = useParams<{ universeId: string }>()
@@ -19,10 +20,8 @@ export default function TimelinePage() {
     setError(null)
     api.getTimeline(universeId)
       .then(({ events: raw }) => {
-        // Sort by timestamp ascending, extract chapter from label or use raw data
-        const sorted = raw
+        const sorted = (raw || [])
           .map((e) => {
-            // ponytail: guess chapter from label pattern "Ch. N" if backend doesn't provide it
             const chapterMatch = e.label?.match(/(?:Ch\.?\s*)(\d+)/i)
             return {
               ...e,
@@ -50,7 +49,7 @@ export default function TimelinePage() {
   if (events.length === 0) {
     return (
       <EmptyState
-        icon="📅"
+        icon="\u{1F4C5}"
         title="No Timeline Events"
         message="Generate a timeline from your work's chapters using AI analysis to visualize the chronological flow of events."
         cta={universe ? `Analyze "${universe.name}"` : undefined}
@@ -58,5 +57,9 @@ export default function TimelinePage() {
     )
   }
 
-  return <TimelineView events={events} />
+  return (
+    <div className={styles.wrap}>
+      <TimelineView events={events} />
+    </div>
+  )
 }

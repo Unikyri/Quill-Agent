@@ -1,0 +1,13 @@
+/* ContradictionsPage — paper-themed wrapper */
+
+.wrap {
+  /* page wrapper */
+}
+
+.filterArea {
+  /* handled by ContradictionList component */
+}
+
+.listArea {
+  margin-top: 12px;
+}

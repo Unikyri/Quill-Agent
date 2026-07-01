@@ -1,21 +1,26 @@
 import { useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UniverseContext } from '../contexts/UniverseContext'
+import styles from './UniverseWorksTab.module.css'
 
 export default function UniverseWorksTab() {
   const { works } = useContext(UniverseContext)
   const navigate = useNavigate()
 
   return (
-    <div>
-      <h2 style={{ marginBottom: 16 }}>Works</h2>
+    <div className={styles.wrap}>
+      <h2 className={styles.heading}>Works</h2>
       {works.length === 0 ? (
-        <div className="card"><p>No works yet.</p></div>
+        <p className={styles.empty}>No works yet.</p>
       ) : (
         works.map((w) => (
-          <div key={w.id} className="card" style={{ cursor: 'pointer' }} onClick={() => navigate(`/work/${w.id}`)}>
-            <h3>{w.title}</h3>
-            <p style={{ color: '#888' }}>{w.type}</p>
+          <div
+            key={w.id}
+            className={styles.card}
+            onClick={() => navigate(`/work/${w.id}`)}
+          >
+            <h3 className={styles.cardTitle}>{w.title}</h3>
+            <p className={styles.cardType}>{w.type}</p>
           </div>
         ))
       )}

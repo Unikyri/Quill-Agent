@@ -1,0 +1,212 @@
+/* EntityCardPage — two-column entity detail with manuscript styling */
+
+.wrap {
+  min-height: 100vh;
+  background: var(--paper-warm);
+}
+
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--ink-10);
+}
+
+.backBtn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  color: var(--ink-60);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.backBtn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.breadcrumb {
+  font-family: var(--micro);
+  font-size: 13px;
+  color: var(--ink-40);
+  font-style: italic;
+}
+
+/* Two-column layout */
+.columns {
+  display: flex;
+  gap: 0;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Left: main content */
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.heading {
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--ink-60);
+  font-style: italic;
+  margin: 0 0 24px;
+}
+
+/* Description */
+.description {
+  font-family: var(--sans);
+  font-size: 15px;
+  color: var(--ink-80);
+  line-height: 1.7;
+  margin: 0 0 28px;
+}
+
+/* Section */
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionLabel {
+  font-family: var(--micro);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-40);
+  margin: 0 0 8px;
+}
+
+.sectionValue {
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--ink);
+  margin: 0;
+}
+
+/* Tag list */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  font-size: 12px;
+  color: var(--ink-60);
+  background: var(--paper);
+  border: 1px solid var(--ink-10);
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+/* Right: sidebar */
+.sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  padding-left: 40px;
+  margin-left: 32px;
+  border-left: 1px solid var(--ink-10);
+}
+
+.sidebarCard {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.sidebarLabel {
+  font-family: var(--micro);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-40);
+  margin: 0 0 4px;
+}
+
+.sidebarValue {
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--ink);
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Related entities */
+.relatedList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.relatedItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--ink-10);
+  transition: color 0.2s;
+}
+
+.relatedItem:hover {
+  color: var(--ink-80);
+}
+
+.relatedItem:last-child {
+  border-bottom: none;
+}
+
+/* States */
+.loading {
+  padding: 48px;
+  text-align: center;
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--ink-60);
+  font-style: italic;
+}
+
+.error {
+  padding: 48px;
+  text-align: center;
+}
+
+.errorText {
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--danger);
+  font-style: italic;
+}
+
+.retryBtn {
+  margin-top: 12px;
+  padding: 8px 20px;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import styles from './WorkPage.module.css'
 
 interface Work {
   id: string
@@ -44,40 +45,36 @@ export default function WorkPage() {
   }, [workId])
 
   if (loading) {
-    return <div style={{ padding: 24, color: '#888' }}>Loading…</div>
+    return <p className={styles.loading}>Loading…</p>
   }
 
   if (error) {
-    return <div style={{ padding: 24, color: '#ff6b6b' }}>Error: {error}</div>
+    return <p className={styles.error}>Error: {error}</p>
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <button
-        onClick={() => navigate(-1)}
-        style={{ background: 'transparent', color: '#6c5ce7', marginBottom: 16 }}
-      >
+    <div className={styles.wrap}>
+      <button className={styles.backBtn} onClick={() => navigate(-1)}>
         ← Back
       </button>
 
-      <h1>{work?.title || 'Untitled Work'}</h1>
-      {work?.type && <p style={{ color: '#888', marginBottom: 24 }}>{work.type}</p>}
+      <h1 className={styles.heading}>{work?.title || 'Untitled Work'}</h1>
+      {work?.type && <p className={styles.type}>{work.type}</p>}
 
-      <h2 style={{ marginBottom: 16 }}>Chapters</h2>
+      <h2 className={styles.sectionHeading}>Chapters</h2>
       {chapters.length === 0 ? (
-        <div className="card"><p>No chapters yet.</p></div>
+        <p className={styles.empty}>No chapters yet.</p>
       ) : (
         chapters
           .sort((a, b) => a.order_index - b.order_index)
           .map((ch) => (
             <div
               key={ch.id}
-              className="card"
-              style={{ cursor: 'pointer' }}
+              className={styles.chapterCard}
               onClick={() => navigate(`/editor/${ch.id}`)}
             >
-              <h3>{ch.title}</h3>
-              <p style={{ color: '#888', fontSize: 13 }}>
+              <h3 className={styles.chapterTitle}>{ch.title}</h3>
+              <p className={styles.chapterMeta}>
                 {ch.word_count > 0 ? `${ch.word_count} words` : 'Empty'}
               </p>
             </div>

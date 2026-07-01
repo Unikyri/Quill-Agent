@@ -1,0 +1,13 @@
+/* TimelinePage — manuscript wrapper */
+
+.wrap {
+  overflow-x: auto;
+}
+
+.timelineArea {
+  background: var(--paper);
+  border: 1px solid var(--ink-10);
+  border-radius: 4px;
+  padding: 16px;
+  min-height: 200px;
+}

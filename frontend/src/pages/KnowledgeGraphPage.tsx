@@ -8,6 +8,7 @@ import GraphControls from '../components/knowledge-graph/GraphControls'
 import NodeDrawer from '../components/knowledge-graph/NodeDrawer'
 import PageStatus from '../components/shared/PageStatus'
 import EmptyState from '../components/shared/EmptyState'
+import styles from './KnowledgeGraphPage.module.css'
 
 export default function KnowledgeGraphPage() {
   const { universeId } = useParams<{ universeId: string }>()
@@ -20,14 +21,12 @@ export default function KnowledgeGraphPage() {
   const graphPings = useWSStore((s) => s.graphPings)
   const prevPingCount = useRef(graphPings.length)
 
-  // Initial fetch
   useEffect(() => {
     if (universeId) {
       fetchGraph(universeId)
     }
   }, [universeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Silent refetch on wsStore graph_updated ping
   useEffect(() => {
     if (graphPings.length > prevPingCount.current) {
       prevPingCount.current = graphPings.length
@@ -41,7 +40,7 @@ export default function KnowledgeGraphPage() {
   if (nodes.length === 0) {
     return (
       <EmptyState
-        icon="🕸️"
+        icon="\u{1F578}"
         title="No Knowledge Graph"
         message="Generate a knowledge graph from your universe entities using AI analysis to visualize character, location, and event relationships."
         cta={universe ? `Analyze "${universe.name}"` : undefined}
@@ -50,9 +49,9 @@ export default function KnowledgeGraphPage() {
   }
 
   return (
-    <div>
+    <div className={styles.wrap}>
       <GraphControls />
-      <div style={{ position: 'relative' }}>
+      <div className={styles.canvasArea}>
         <GraphCanvas />
         <NodeDrawer />
       </div>

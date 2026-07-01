@@ -6,6 +6,7 @@ import { useWS } from '../hooks/useWS'
 import { api } from '../lib/api'
 import TipTapEditor from '../components/editor/TipTapEditor'
 import ContextPanel from '../components/context-panel/ContextPanel'
+import styles from './EditorPage.module.css'
 
 export default function EditorPage() {
   const { chapterId } = useParams<{ chapterId: string }>()
@@ -15,22 +16,18 @@ export default function EditorPage() {
   const [workId, setWorkId] = useState<string>('')
   const [universeId, setUniverseId] = useState<string>('')
 
-  // Open WS connection
   useWS()
 
-  // Load chapter data on mount
   useEffect(() => {
     if (chapterId) {
       api.getChapter(chapterId).then(({ chapter }) => {
         setContent(chapter.content || '', chapter.raw_text || '')
-        // Derive workId and universeId from chapter if available
         if (chapter.work_id) setWorkId(chapter.work_id)
         if (chapter.universe_id) setUniverseId(chapter.universe_id)
       })
     }
   }, [chapterId])
 
-  // Auto-save after 5 seconds of inactivity via editorStore
   const handleContentChange = useCallback((_html: string, text: string) => {
     setContent(_html, text)
 
@@ -40,25 +37,17 @@ export default function EditorPage() {
     }, 5000)
   }, [chapterId, setContent, saveContent])
 
-  // Traffic light indicator
-  const statusIndicator = wsStatus === 'open' ? '🟢' : wsStatus === 'reconnecting' ? '🟡' : '🔴'
+  const statusIndicator = wsStatus === 'open' ? '\u{1F7E2}' : wsStatus === 'reconnecting' ? '\u{1F7E1}' : '\u{1F534}'
 
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
-      {/* Editor */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{
-          padding: '12px 24px',
-          borderBottom: '1px solid #333',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
-          <span style={{ color: '#888', display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div className={styles.wrap}>
+      <div className={styles.editorPanel}>
+        <div className={styles.headerBar}>
+          <span className={styles.headerLeft}>
             Chapter Editor
-            <span title={`WS: ${wsStatus}`} style={{ fontSize: 12 }}>{statusIndicator}</span>
+            <span className={styles.wsIndicator} title={`WS: ${wsStatus}`}>{statusIndicator}</span>
           </span>
-          <div style={{ display: 'flex', gap: 16, color: '#888', fontSize: 12 }}>
+          <div className={styles.headerRight}>
             <span>{wordCount} words</span>
             <span>{isSaving ? 'Saving...' : lastSavedAt ? `Saved ${lastSavedAt.toLocaleTimeString()}` : ''}</span>
           </div>
@@ -73,9 +62,7 @@ export default function EditorPage() {
             onContentChange={handleContentChange}
           />
         ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555' }}>
-            Loading editor…
-          </div>
+          <div className={styles.loading}>Loading editor…</div>
         )}
       </div>
 

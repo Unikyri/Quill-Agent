@@ -1,0 +1,53 @@
+/* UniverseWorksTab — work cards with manuscript styling */
+
+.wrap {
+  /* inherited from parent layout */
+}
+
+.heading {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 20px;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 20px 24px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+  border-color: var(--ink);
+  box-shadow: 0 2px 8px var(--ink-10);
+}
+
+.cardTitle {
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.cardType {
+  font-family: var(--micro);
+  font-size: 13px;
+  color: var(--ink-60);
+  font-style: italic;
+  margin: 0;
+}
+
+.empty {
+  text-align: center;
+  padding: 32px;
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--ink-60);
+  font-style: italic;
+}

@@ -1,0 +1,109 @@
+/* WorkPage — chapter cards */
+
+.wrap {
+  min-height: 100vh;
+  background: var(--paper-warm);
+  padding: 24px 32px;
+}
+
+.backBtn {
+  padding: 6px 12px;
+  margin-bottom: 20px;
+  background: transparent;
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  color: var(--ink-60);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.backBtn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.heading {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.type {
+  font-family: var(--micro);
+  font-size: 14px;
+  color: var(--ink-60);
+  font-style: italic;
+  margin: 0 0 28px;
+}
+
+.sectionHeading {
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 16px;
+}
+
+/* Chapter card */
+.chapterCard {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 16px 20px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.chapterCard:hover {
+  border-color: var(--ink);
+  box-shadow: 0 1px 6px var(--ink-10);
+}
+
+.chapterTitle {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.chapterMeta {
+  font-family: var(--micro);
+  font-size: 13px;
+  color: var(--ink-60);
+  font-style: italic;
+  margin: 0;
+}
+
+/* States */
+.loading {
+  padding: 48px;
+  text-align: center;
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--ink-60);
+  font-style: italic;
+}
+
+.error {
+  padding: 48px;
+  text-align: center;
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--danger);
+  font-style: italic;
+}
+
+.empty {
+  text-align: center;
+  padding: 32px;
+  font-family: var(--micro);
+  font-size: 15px;
+  color: var(--ink-60);
+  font-style: italic;
+}
