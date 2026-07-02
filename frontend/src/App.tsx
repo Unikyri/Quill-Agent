@@ -12,7 +12,7 @@ import PlotHolesPage from './pages/PlotHolesPage'
 import EditorPage from './pages/EditorPage'
 import WorkPage from './pages/WorkPage'
 
-// ponytail: lazy-loaded — GSAP stays in this chunk, not the main bundle
+// ponytail: lazy-loaded — keeps landing page out of main bundle
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const EntityCardPage = lazy(() => import('./pages/EntityCardPage'))
 

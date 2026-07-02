@@ -118,7 +118,7 @@ func (h *Hub) SendToUser(userID uuid.UUID, msg WSMessage) error {
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 
-	data, err := MarshalMessage(msg)
+	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
 	}
@@ -142,7 +142,7 @@ func (h *Hub) Handle(wsConn *websocket.Conn) {
 	if err != nil {
 		// Send auth error and close
 		errMsg, _ := NewMessage(TypeAuthError, map[string]string{"error": err.Error()})
-		if data, merr := MarshalMessage(errMsg); merr == nil {
+		if data, merr := json.Marshal(errMsg); merr == nil {
 			_ = wsConn.WriteMessage(websocket.TextMessage, data)
 		}
 		return
@@ -150,7 +150,7 @@ func (h *Hub) Handle(wsConn *websocket.Conn) {
 
 	// Send auth_ok
 	okMsg, _ := NewMessage(TypeAuthOK, map[string]string{"status": "ok"})
-	if data, err := MarshalMessage(okMsg); err == nil {
+	if data, err := json.Marshal(okMsg); err == nil {
 		_ = wsConn.WriteMessage(websocket.TextMessage, data)
 	}
 
@@ -181,8 +181,8 @@ func (h *Hub) Handle(wsConn *websocket.Conn) {
 			continue
 		}
 
-		msg, err := ParseMessage(raw)
-		if err != nil {
+		var msg WSMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
 			log.Printf("[ws] parse error for user %s: %v", userID, err)
 			continue
 		}
@@ -211,8 +211,8 @@ func (h *Hub) handleAuthInit(wsConn *websocket.Conn) (uuid.UUID, error) {
 		return uuid.Nil, fmt.Errorf("expected text message for auth_init")
 	}
 
-	msg, err := ParseMessage(raw)
-	if err != nil {
+	var msg WSMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
 		return uuid.Nil, fmt.Errorf("parse auth_init: %w", err)
 	}
 	if msg.Type != TypeAuthInit {

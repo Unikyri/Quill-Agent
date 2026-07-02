@@ -29,20 +29,6 @@ const (
 // Re-exported from models for the ws package convenience.
 type WSMessage = models.WSMessage
 
-// ParseMessage extracts the type from raw JSON bytes.
-func ParseMessage(raw []byte) (WSMessage, error) {
-	var msg WSMessage
-	if err := json.Unmarshal(raw, &msg); err != nil {
-		return WSMessage{}, err
-	}
-	return msg, nil
-}
-
-// MarshalMessage serializes a WSMessage to JSON bytes.
-func MarshalMessage(msg WSMessage) ([]byte, error) {
-	return json.Marshal(msg)
-}
-
 // NewMessage creates a WSMessage with the given type and payload.
 func NewMessage(msgType string, payload interface{}) (WSMessage, error) {
 	payloadBytes, err := json.Marshal(payload)

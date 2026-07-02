@@ -97,6 +97,8 @@
   letter-spacing: 3px;
   color: var(--ink-60);
   margin: 0 0 24px;
+  opacity: 0;
+  animation: fadeInUp 0.7s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 .heroTitle {
@@ -108,6 +110,8 @@
   max-width: 720px;
   margin: 0 0 28px;
   letter-spacing: -1px;
+  opacity: 0;
+  animation: fadeInUp 0.8s cubic-bezier(0.4, 0, 0.2, 1) 0.4s both;
 }
 
 .heroSubtitle {
@@ -118,6 +122,8 @@
   line-height: 1.6;
   max-width: 580px;
   margin: 0 0 44px;
+  opacity: 0;
+  animation: fadeInUp 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.9s both;
 }
 
 .heroCta {
@@ -133,6 +139,8 @@
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.2s, transform 0.2s;
+  opacity: 0;
+  animation: fadeInUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) 1.4s both;
 }
 
 .heroCta:hover {
@@ -147,6 +155,8 @@
   background: var(--ink-40);
   margin: 56px auto 0;
   position: relative;
+  opacity: 0;
+  animation: scaleInX 0.6s cubic-bezier(0.4, 0, 0.2, 1) 1.9s both;
 }
 
 .heroOrnament::after {
@@ -201,6 +211,7 @@
   border-radius: 4px;
   padding: 36px 32px;
   transition: border-color 0.3s, box-shadow 0.3s;
+  opacity: 0;
 }
 
 .featureCard:hover {
@@ -245,6 +256,7 @@
   color: var(--ink-60);
   line-height: 1.7;
   margin: 0 0 16px;
+  opacity: 0;
 }
 
 .closingAuthor {
@@ -255,6 +267,7 @@
   letter-spacing: 2px;
   color: var(--ink-40);
   margin: 0 0 48px;
+  opacity: 0;
 }
 
 .closingCta {
@@ -288,4 +301,38 @@
   font-size: 12px;
   color: var(--ink-40);
   margin: 0;
+}
+
+/* ---- Animations (ponytail: replaces GSAP) ---- */
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleInX {
+  from { opacity: 0; transform: scaleX(0); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+.visible {
+  /* trigger class added by IntersectionObserver */
+}
+
+/* Scroll reveal via IntersectionObserver + .visible */
+
+.featureCard.visible {
+  animation: fadeInUp 0.7s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.featureCard:nth-child(1).visible { animation-delay: 0s; }
+.featureCard:nth-child(2).visible { animation-delay: 0.12s; }
+.featureCard:nth-child(3).visible { animation-delay: 0.24s; }
+.featureCard:nth-child(4).visible { animation-delay: 0.36s; }
+
+.closingQuote.visible {
+  animation: fadeInUp 0.8s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.closingAuthor.visible {
+  animation: fadeInUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.2s both;
 }

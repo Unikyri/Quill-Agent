@@ -18,6 +18,9 @@ type ContradictionHandler struct {
 
 // NewContradictionHandler creates a contradiction handler.
 func NewContradictionHandler(contraSvc *services.ContradictionService, contradictionRepo *repositories.ContradictionRepo) *ContradictionHandler {
+	if contradictionRepo == nil {
+		panic("contradictionRepo required")
+	}
 	return &ContradictionHandler{contraSvc: contraSvc, contradictionRepo: contradictionRepo}
 }
 
@@ -28,12 +31,6 @@ func (h *ContradictionHandler) ListByUniverse(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
-		})
-	}
-
-	if h.contradictionRepo == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "ContradictionRepo not initialized"},
 		})
 	}
 
@@ -59,12 +56,6 @@ func (h *ContradictionHandler) Dismiss(c *fiber.Ctx) error {
 		})
 	}
 
-	if h.contradictionRepo == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "ContradictionRepo not initialized"},
-		})
-	}
-
 	if err := h.contradictionRepo.Dismiss(c.Context(), id); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
@@ -81,12 +72,6 @@ func (h *ContradictionHandler) Resolve(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid contradiction ID"},
-		})
-	}
-
-	if h.contradictionRepo == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "ContradictionRepo not initialized"},
 		})
 	}
 

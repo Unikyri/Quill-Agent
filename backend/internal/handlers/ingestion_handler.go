@@ -20,6 +20,9 @@ type IngestionHandler struct {
 
 // NewIngestionHandler creates an ingestion handler backed by the given service.
 func NewIngestionHandler(svc IngestionStarter) *IngestionHandler {
+	if svc == nil {
+		panic("ingestionSvc required")
+	}
 	return &IngestionHandler{ingestionSvc: svc}
 }
 
@@ -47,12 +50,6 @@ func (h *IngestionHandler) Ingest(c *fiber.Ctx) error {
 		})
 	}
 	defer f.Close()
-
-	if h.ingestionSvc == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": fiber.Map{"code": "SERVICE_UNAVAILABLE", "message": "Ingestion service not configured"},
-		})
-	}
 
 	// ponytail: work_id follows universe_id for now. A future UI can let users
 	// select which work to ingest into.

@@ -130,7 +130,6 @@ func main() {
 	demoH := handlers.NewDemoHandler(demoSvc)
 
 	// Phase 2a handlers
-	wsH := handlers.NewWSHandler(hub)
 	contradictionH := handlers.NewContradictionHandler(contraSvc, contradictionRepo)
 	timelineH := handlers.NewTimelineHandler(timelineSvc, timelineRepo)
 	plotHoleH := handlers.NewPlotHoleHandler(plotHoleSvc).WithRepo(plotHoleRepo)
@@ -202,7 +201,7 @@ func main() {
 
 	// WebSocket route (gated by config)
 	if cfg.WSEnabled {
-		app.Get("/api/v1/ws", websocket.New(wsH.Upgrade))
+		app.Get("/api/v1/ws", websocket.New(hub.Handle))
 	}
 
 	// Demo (public)

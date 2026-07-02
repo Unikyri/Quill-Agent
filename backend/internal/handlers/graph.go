@@ -17,6 +17,15 @@ type GraphHandler struct {
 
 // NewGraphHandler creates a graph handler.
 func NewGraphHandler(graphRepo *repositories.GraphRepo, memorySvc *services.MemoryService, entityRepo *repositories.EntityRepo) *GraphHandler {
+	if graphRepo == nil {
+		panic("graphRepo required")
+	}
+	if memorySvc == nil {
+		panic("memorySvc required")
+	}
+	if entityRepo == nil {
+		panic("entityRepo required")
+	}
 	return &GraphHandler{graphRepo: graphRepo, memorySvc: memorySvc, entityRepo: entityRepo}
 }
 
@@ -27,12 +36,6 @@ func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
-		})
-	}
-
-	if h.graphRepo == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "GraphRepo not initialized"},
 		})
 	}
 
@@ -82,12 +85,6 @@ func (h *GraphHandler) Neighbors(c *fiber.Ctx) error {
 		hops = 5 // ponytail: cap at 5 to avoid deep traversal
 	}
 
-	if h.graphRepo == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "GraphRepo not initialized"},
-		})
-	}
-
 	graphName := "universe_" + universeID.String()
 	nodes, edges, err := h.graphRepo.NHopTraversal(c.Context(), graphName, entityID.String(), hops)
 	if err != nil {
@@ -135,12 +132,6 @@ func (h *GraphHandler) Recall(c *fiber.Ctx) error {
 	}
 	if req.K > 20 {
 		req.K = 20
-	}
-
-	if h.memorySvc == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "MemoryService not initialized"},
-		})
 	}
 
 	items, err := h.memorySvc.Recall(c.Context(), universeID, nil, req.K)

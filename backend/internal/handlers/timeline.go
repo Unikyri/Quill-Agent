@@ -17,6 +17,9 @@ type TimelineHandler struct {
 
 // NewTimelineHandler creates a timeline handler.
 func NewTimelineHandler(timelineSvc *services.TimelineService, timelineRepo *repositories.TimelineRepo) *TimelineHandler {
+	if timelineRepo == nil {
+		panic("timelineRepo required")
+	}
 	return &TimelineHandler{timelineSvc: timelineSvc, timelineRepo: timelineRepo}
 }
 
@@ -27,12 +30,6 @@ func (h *TimelineHandler) ListByUniverse(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
-		})
-	}
-
-	if h.timelineRepo == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "TimelineRepo not initialized"},
 		})
 	}
 
@@ -66,12 +63,6 @@ func (h *TimelineHandler) Create(c *fiber.Ctx) error {
 	}
 
 	req.UniverseID = universeID
-
-	if h.timelineRepo == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "TimelineRepo not initialized"},
-		})
-	}
 
 	req.ID = uuid.New()
 	if err := h.timelineRepo.Create(c.Context(), &req); err != nil {

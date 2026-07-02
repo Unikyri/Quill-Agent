@@ -1,10 +1,6 @@
-import { useRef, useLayoutEffect } from 'react'
+import { useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import gsap from 'gsap'
-import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import styles from './LandingPage.module.css'
-
-gsap.registerPlugin(ScrollTrigger)
 
 const features = [
   {
@@ -27,69 +23,33 @@ const features = [
 
 export default function LandingPage() {
   const navigate = useNavigate()
-  const heroRef = useRef<HTMLElement>(null)
   const featureCardsRef = useRef<(HTMLDivElement | null)[]>([])
-  const closingRef = useRef<HTMLElement>(null)
 
-  useLayoutEffect(() => {
-    const ctx = gsap.context(() => {
-      // Hero — staggered reveal on load (no scroll needed for first impression)
-      const hero = heroRef.current
-      if (hero) {
-        const tl = gsap.timeline({ defaults: { ease: 'power2.out' } })
-        tl.from(hero.querySelector('[data-anim="tagline"]'), { opacity: 0, y: 16, duration: 0.7 })
-          .from(hero.querySelector('[data-anim="title"]'), { opacity: 0, y: 24, duration: 0.8 }, '-=0.3')
-          .from(hero.querySelector('[data-anim="subtitle"]'), { opacity: 0, y: 16, duration: 0.7 }, '-=0.3')
-          .from(hero.querySelector('[data-anim="cta"]'), { opacity: 0, y: 12, duration: 0.6 }, '-=0.2')
-          .from(hero.querySelector('[data-anim="ornament"]'), { opacity: 0, scaleX: 0, duration: 0.6 }, '-=0.1')
-      }
+  // ponytail: IntersectionObserver for scroll-triggered reveals (replaces GSAP ScrollTrigger)
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add(styles.visible)
+            observer.unobserve(entry.target)
+          }
+        }
+      },
+      { threshold: 0, rootMargin: '0px 0px -80px 0px' }
+    )
 
-      // Feature cards — scroll-triggered fade+reveal
-      featureCardsRef.current.forEach((card, i) => {
-        if (!card) return
-        gsap.from(card, {
-          scrollTrigger: {
-            trigger: card,
-            start: 'top bottom-=80',
-            toggleActions: 'play none none none',
-          },
-          opacity: 0,
-          y: 32,
-          duration: 0.7,
-          delay: i * 0.12,
-          ease: 'power2.out',
-        })
-      })
-
-      // Closing section — scroll-triggered
-      if (closingRef.current) {
-        gsap.from(closingRef.current.querySelector('[data-anim="quote"]'), {
-          scrollTrigger: {
-            trigger: closingRef.current,
-            start: 'top bottom-=60',
-            toggleActions: 'play none none none',
-          },
-          opacity: 0,
-          y: 24,
-          duration: 0.8,
-          ease: 'power2.out',
-        })
-        gsap.from(closingRef.current.querySelector('[data-anim="author"]'), {
-          scrollTrigger: {
-            trigger: closingRef.current,
-            start: 'top bottom-=40',
-            toggleActions: 'play none none none',
-          },
-          opacity: 0,
-          y: 16,
-          duration: 0.6,
-          delay: 0.2,
-          ease: 'power2.out',
-        })
-      }
+    // Feature cards
+    featureCardsRef.current.forEach((card) => {
+      if (card) observer.observe(card)
     })
 
-    return () => ctx.revert()
+    // Closing section elements
+    document.querySelectorAll('[data-anim="quote"], [data-anim="author"]').forEach((el) => {
+      observer.observe(el)
+    })
+
+    return () => observer.disconnect()
   }, [])
 
   const scrollTo = (id: string) => {
@@ -115,7 +75,7 @@ export default function LandingPage() {
       </nav>
 
       {/* Hero */}
-      <section className={styles.hero} ref={heroRef}>
+      <section className={styles.hero}>
         <p className={styles.heroTagline} data-anim="tagline">
           For writers who build worlds
         </p>
@@ -160,7 +120,7 @@ export default function LandingPage() {
       </section>
 
       {/* Closing */}
-      <section className={styles.closing} id="closing" ref={closingRef}>
+      <section className={styles.closing} id="closing">
         <p className={styles.closingQuote} data-anim="quote">
           "A writer is a world trapped in a person."
         </p>
