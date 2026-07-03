@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import styles from './WorkPage.module.css'
@@ -25,24 +25,37 @@ export default function WorkPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const [showNewForm, setShowNewForm] = useState(false)
+  const [chapterTitle, setChapterTitle] = useState('')
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const fetchData = useCallback(() => {
     if (!workId) return
     setLoading(true)
     setError(null)
-
-    Promise.all([
-      api.getWork(workId),
-      api.listChapters(workId),
-    ])
+    Promise.all([api.getWork(workId), api.listChapters(workId)])
       .then(([{ work }, { chapters }]) => {
         setWork(work)
         setChapters(chapters)
       })
-      .catch((err) => {
-        setError(err.message || 'Failed to load work')
-      })
+      .catch((err) => setError(err.message || 'Failed to load work'))
       .finally(() => setLoading(false))
   }, [workId])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  const handleCreateChapter = async () => {
+    if (!workId) return; if (!chapterTitle.trim()) { setSubmitError('Title is required'); return }
+    setSubmitError(null)
+    try {
+      const { chapter } = await api.createChapter(workId, { title: chapterTitle.trim() })
+      setShowNewForm(false)
+      setChapterTitle('')
+      navigate(`/editor/${chapter.id}`)
+    } catch (err) {
+      setSubmitError((err as Error).message || 'Failed to create chapter')
+    }
+  }
 
   if (loading) {
     return <p className={styles.loading}>Loading…</p>
@@ -54,14 +67,37 @@ export default function WorkPage() {
 
   return (
     <div className={styles.wrap}>
-      <button className={styles.backBtn} onClick={() => navigate(-1)}>
+      <button
+        className={styles.backBtn}
+        onClick={() => work?.universe_id ? navigate(`/universe/${work.universe_id}`) : navigate(-1)}
+      >
         ← Back
       </button>
 
       <h1 className={styles.heading}>{work?.title || 'Untitled Work'}</h1>
       {work?.type && <p className={styles.type}>{work.type}</p>}
 
-      <h2 className={styles.sectionHeading}>Chapters</h2>
+      <div className={styles.headerRow}>
+        <h2 className={styles.sectionHeading}>Chapters</h2>
+        {!showNewForm ? (
+          <button className={styles.newBtn} onClick={() => setShowNewForm(true)}>
+            + New Chapter
+          </button>
+        ) : (
+          <div className={styles.inlineForm}>
+            <input
+              className={styles.formInput}
+              placeholder="Chapter title"
+              value={chapterTitle}
+              onChange={(e) => setChapterTitle(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
+            />
+            <button className={styles.formSubmit} onClick={handleCreateChapter}>Create</button>
+            <button className={styles.formCancel} onClick={() => { setShowNewForm(false); setSubmitError(null) }}>Cancel</button>
+          </div>
+        )}
+        {submitError && <p className={styles.formError}>{submitError}</p>}
+      </div>
       {chapters.length === 0 ? (
         <p className={styles.empty}>No chapters yet.</p>
       ) : (

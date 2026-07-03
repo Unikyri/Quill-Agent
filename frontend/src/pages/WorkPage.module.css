@@ -45,7 +45,96 @@
   font-size: 18px;
   font-weight: 600;
   color: var(--ink);
-  margin: 0 0 16px;
+  margin: 0;
+}
+
+/* New chapter button + inline form */
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.newBtn {
+  padding: 8px 16px;
+  background: var(--ink);
+  color: var(--paper-warm);
+  border: none;
+  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.newBtn:hover {
+  opacity: 0.85;
+}
+
+.inlineForm {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-left: 16px;
+}
+
+.formInput {
+  padding: 8px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: var(--card-bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  outline: none;
+  min-width: 200px;
+}
+
+.formInput:focus {
+  border-color: var(--ink);
+}
+
+.formSubmit {
+  padding: 8px 16px;
+  background: var(--ink);
+  color: var(--paper-warm);
+  border: none;
+  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.formSubmit:hover {
+  opacity: 0.85;
+}
+
+.formCancel {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--ink-20);
+  border-radius: 4px;
+  color: var(--ink-60);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.formCancel:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.formError {
+  margin: 4px 0 0;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--danger);
 }
 
 /* Chapter card */

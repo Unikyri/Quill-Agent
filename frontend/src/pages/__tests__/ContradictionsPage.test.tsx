@@ -22,6 +22,7 @@ vi.mock('../../lib/api', () => ({
 const defaultContext = {
   universe: { id: 'uni-1', name: 'Test Universe', genre: 'Fantasy', format: 'Novel' },
   works: [],
+  refetchWorks: vi.fn(),
 }
 
 function renderPage() {

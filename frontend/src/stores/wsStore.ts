@@ -86,24 +86,24 @@ export const useWSStore = create<WSState>((set, get) => {
         set({ lastError: (payload.message as string) || 'Unknown WS error' })
         break
       case 'analysis_result':
-        set({ analysisResults: [...get().analysisResults, payload as AnalysisResult] })
+        set({ analysisResults: [...get().analysisResults, payload as AnalysisResult].slice(-200) })
         break
       case 'contradiction_alert':
         set({
           contradictions: [
             ...get().contradictions,
             (payload.contradiction as Contradiction) ?? (payload as Contradiction),
-          ],
+          ].slice(-200),
         })
         break
       case 'entity_discovered':
-        set({ discoveredEntities: [...get().discoveredEntities, payload as DiscoveredEntity] })
+        set({ discoveredEntities: [...get().discoveredEntities, payload as DiscoveredEntity].slice(-200) })
         break
       case 'contextual_recall':
-        set({ recallItems: [...get().recallItems, payload as RecallItem] })
+        set({ recallItems: [...get().recallItems, payload as RecallItem].slice(-200) })
         break
       case 'graph_updated':
-        set({ graphPings: [...get().graphPings, payload as GraphPing] })
+        set({ graphPings: [...get().graphPings, payload as GraphPing].slice(-200) })
         break
       default:
         break

@@ -54,6 +54,20 @@ func escapeCypherString(s string) string {
 	return s
 }
 
+// withAgeTx loads AGE + sets search_path on a transaction's connection,
+// then runs fn. Avoids pool.Acquire inside a transaction — prevents deadlock
+// when pool is saturated by concurrent requests.
+func (r *GraphRepo) withAgeTx(tx pgx.Tx, fn func(conn *pgx.Conn) error) error {
+	c := tx.Conn()
+	if _, err := c.Exec(context.Background(), "LOAD 'age'"); err != nil {
+		return fmt.Errorf("load age: %w", err)
+	}
+	if _, err := c.Exec(context.Background(), `SET search_path = ag_catalog, "$user", public`); err != nil {
+		return fmt.Errorf("set search_path: %w", err)
+	}
+	return fn(c)
+}
+
 // withAgeConn acquires a dedicated connection, loads AGE + sets search_path,
 // runs fn, then releases. This ensures AGE is available regardless of pool state.
 // AfterConnect in pgxpool doesn't reliably persist LOAD across all connections.
@@ -98,6 +112,44 @@ func (r *GraphRepo) CreateNode(ctx context.Context, graphName, label string, pro
 
 func (r *GraphRepo) CreateEdge(ctx context.Context, graphName, sourceEntityID, targetEntityID, relType string, properties map[string]interface{}) error {
 	return r.withAgeConn(ctx, func(c *pgx.Conn) error {
+		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (x {entity_id: '%s'}), (y {entity_id: '%s'}) CREATE (x)-[:%s]->(y) $$) AS (r agtype)`,
+			quoteGraph(graphName),
+			escapeCypherString(sourceEntityID),
+			escapeCypherString(targetEntityID),
+			relType)
+		_, err := c.Exec(ctx, query)
+		return err
+	})
+}
+
+// Tx variants: use the transaction's connection instead of acquiring from pool.
+// ponytail: identical cypher bodies to non-Tx originals, just different conn source.
+
+func (r *GraphRepo) CreateGraphTx(ctx context.Context, tx pgx.Tx, universeID string) error {
+	graphName := "universe_" + universeID
+	return r.withAgeTx(tx, func(c *pgx.Conn) error {
+		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ CREATE (g:Graph {name: '%s'}) RETURN g $$) AS (g agtype)`,
+			quoteGraph(graphName), graphName)
+		_, err := c.Exec(ctx, query)
+		return err
+	})
+}
+
+func (r *GraphRepo) CreateNodeTx(ctx context.Context, tx pgx.Tx, graphName, label string, properties map[string]interface{}) error {
+	return r.withAgeTx(tx, func(c *pgx.Conn) error {
+		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ CREATE (n:%s {entity_id: '%s', name: '%s', status: '%s', relevance_score: %v}) RETURN n $$) AS (n agtype)`,
+			quoteGraph(graphName), label,
+			escapeCypherString(fmt.Sprint(properties["entity_id"])),
+			escapeCypherString(fmt.Sprint(properties["name"])),
+			escapeCypherString(fmt.Sprint(properties["status"])),
+			properties["relevance_score"])
+		_, err := c.Exec(ctx, query)
+		return err
+	})
+}
+
+func (r *GraphRepo) CreateEdgeTx(ctx context.Context, tx pgx.Tx, graphName, sourceEntityID, targetEntityID, relType string, properties map[string]interface{}) error {
+	return r.withAgeTx(tx, func(c *pgx.Conn) error {
 		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (x {entity_id: '%s'}), (y {entity_id: '%s'}) CREATE (x)-[:%s]->(y) $$) AS (r agtype)`,
 			quoteGraph(graphName),
 			escapeCypherString(sourceEntityID),

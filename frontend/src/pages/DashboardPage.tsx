@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUniverseStore } from '../stores/universeStore'
 import { useAuthStore } from '../stores/authStore'
+import { api } from '../lib/api'
 import styles from './DashboardPage.module.css'
 
 export default function DashboardPage() {
@@ -9,7 +10,28 @@ export default function DashboardPage() {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
 
+  const [showNewForm, setShowNewForm] = useState(false)
+  const [name, setName] = useState('')
+  const [genre, setGenre] = useState('sci-fi')
+  const [format, setFormat] = useState('novel')
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
   useEffect(() => { fetchUniverses() }, [])
+
+  const handleCreate = async () => {
+    if (!name.trim()) { setSubmitError('Name is required'); return }
+    setSubmitError(null)
+    try {
+      await api.createUniverse({ name: name.trim(), genre, format })
+      await fetchUniverses()
+      setShowNewForm(false)
+      setName('')
+      setGenre('sci-fi')
+      setFormat('novel')
+    } catch (err) {
+      setSubmitError((err as Error).message || 'Failed to create universe')
+    }
+  }
 
   return (
     <div className={styles.layout}>
@@ -49,6 +71,45 @@ export default function DashboardPage() {
       <main className={styles.main}>
         <h2 className={styles.mainHeading}>Your Universes</h2>
         <p className={styles.mainSub}>Worlds waiting for ink</p>
+
+        <div className={styles.headerRow}>
+          {!showNewForm ? (
+            <button
+              className={styles.newBtn}
+              onClick={() => setShowNewForm(true)}
+            >
+              + New Universe
+            </button>
+          ) : (
+            <div className={styles.inlineForm}>
+              <input
+                className={styles.formInput}
+                placeholder="Universe name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              />
+              <select className={styles.formSelect} value={genre} onChange={(e) => setGenre(e.target.value)}>
+                <option value="sci-fi">Sci-Fi</option>
+                <option value="fantasy">Fantasy</option>
+                <option value="mystery">Mystery</option>
+                <option value="romance">Romance</option>
+                <option value="horror">Horror</option>
+                <option value="literary">Literary</option>
+              </select>
+              <select className={styles.formSelect} value={format} onChange={(e) => setFormat(e.target.value)}>
+                <option value="novel">Novel</option>
+                <option value="short-story">Short Story</option>
+                <option value="screenplay">Screenplay</option>
+                <option value="comic">Comic</option>
+                <option value="interactive">Interactive</option>
+              </select>
+              <button className={styles.formSubmit} onClick={handleCreate}>Create</button>
+              <button className={styles.formCancel} onClick={() => { setShowNewForm(false); setSubmitError(null) }}>Cancel</button>
+            </div>
+          )}
+          {submitError && <p className={styles.formError}>{submitError}</p>}
+        </div>
 
         {universes.length === 0 ? (
           <div className={styles.emptyCard}>

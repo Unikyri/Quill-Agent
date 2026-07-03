@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate, Outlet, NavLink } from 'react-router-dom'
 import { UniverseContext, type UniverseContextValue } from '../contexts/UniverseContext'
 import { api } from '../lib/api'
@@ -7,9 +7,19 @@ import styles from './UniverseLayout.module.css'
 export default function UniverseLayout() {
   const { universeId } = useParams<{ universeId: string }>()
   const navigate = useNavigate()
-  const [ctx, setCtx] = useState<UniverseContextValue>({ universe: null, works: [] })
+  const [ctx, setCtx] = useState<UniverseContextValue>({ universe: null, works: [], refetchWorks: async () => {} })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const refetchWorks = useCallback(async () => {
+    if (!universeId) return
+    try {
+      const { works } = await api.listWorks(universeId)
+      setCtx((prev) => ({ ...prev, works }))
+    } catch {
+      // silent — works list is supplementary
+    }
+  }, [universeId])
 
   useEffect(() => {
     if (!universeId) return
@@ -17,14 +27,14 @@ export default function UniverseLayout() {
     setError(null)
     Promise.all([api.getUniverse(universeId), api.listWorks(universeId)])
       .then(([{ universe }, { works }]) => {
-        setCtx({ universe, works })
+        setCtx({ universe, works, refetchWorks })
         setLoading(false)
       })
       .catch((err) => {
         setError((err as Error).message)
         setLoading(false)
       })
-  }, [universeId])
+  }, [universeId, refetchWorks])
 
   if (loading) {
     return (

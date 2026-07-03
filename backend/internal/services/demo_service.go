@@ -393,7 +393,7 @@ func remapUUIDs(ids []string, m map[string]string) []string {
 // into a new graph for the cloned universe, remapping entity_ids.
 func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, newID string, entityMap map[string]string) error {
 	// 1. Create the new graph
-	if err := s.graphRepo.CreateGraph(ctx, newID); err != nil {
+	if err := s.graphRepo.CreateGraphTx(ctx, tx, newID); err != nil {
 		return fmt.Errorf("create graph: %w", err)
 	}
 	newGraphName := "universe_" + newID
@@ -420,7 +420,7 @@ func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, new
 			"relevance_score": relevance,
 		}
 		// ponytail: use entity type as graph node label directly
-		if err := s.graphRepo.CreateNode(ctx, newGraphName, etype, props); err != nil {
+		if err := s.graphRepo.CreateNodeTx(ctx, tx, newGraphName, etype, props); err != nil {
 			return fmt.Errorf("create node %s: %w", newEntityID, err)
 		}
 	}
@@ -451,7 +451,7 @@ func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, new
 
 		newSrcID := entityMap[srcID]
 		newTgtID := entityMap[tgtID]
-		if err := s.graphRepo.CreateEdge(ctx, newGraphName, newSrcID, newTgtID, relType, nil); err != nil {
+		if err := s.graphRepo.CreateEdgeTx(ctx, tx, newGraphName, newSrcID, newTgtID, relType, nil); err != nil {
 			return fmt.Errorf("create edge %s-[%s]->%s: %w", newSrcID, relType, newTgtID, err)
 		}
 	}
