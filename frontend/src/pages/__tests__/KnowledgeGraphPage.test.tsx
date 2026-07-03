@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import KnowledgeGraphPage from '../KnowledgeGraphPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
@@ -7,6 +7,13 @@ import { useGraphStore } from '../../stores/graphStore'
 
 // CSS module mock
 vi.mock('../KnowledgeGraphPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
+
+// Navigate spy for CTA assertion
+const mockNavigate = vi.fn()
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  return { ...actual, useNavigate: () => mockNavigate }
+})
 
 // Mutable box for wsStore graphPings — reassign .value to simulate new pings
 const { pingBox } = vi.hoisted(() => {
@@ -51,6 +58,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockNavigate.mockClear()
   pingBox.value = [] // start each test with no pings
   useGraphStore.setState({
     nodes: [],
@@ -141,5 +149,42 @@ describe('KnowledgeGraphPage', () => {
     await waitFor(() => {
       expect(mockGetGraph).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it('renders CTA button in empty state that navigates to works tab', async () => {
+    mockGetGraph.mockResolvedValue({ nodes: [], edges: [] })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('No Knowledge Graph')).toBeInTheDocument()
+    })
+
+    const ctaButton = screen.getByText('Analyze "Test Universe"')
+    expect(ctaButton).toBeInTheDocument()
+    expect(ctaButton.tagName).toBe('BUTTON')
+
+    fireEvent.click(ctaButton)
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/works')
+  })
+
+  it('hides CTA button when universe is null', async () => {
+    mockGetGraph.mockResolvedValue({ nodes: [], edges: [] })
+
+    const nullContext = { ...defaultContext, universe: null as unknown as typeof defaultContext.universe }
+    render(
+      <UniverseContext.Provider value={nullContext}>
+        <MemoryRouter initialEntries={['/universe/uni-1/graph']}>
+          <Routes>
+            <Route path="/universe/:universeId/graph" element={<KnowledgeGraphPage />} />
+          </Routes>
+        </MemoryRouter>
+      </UniverseContext.Provider>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('No Knowledge Graph')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText(/Analyze/)).not.toBeInTheDocument()
   })
 })

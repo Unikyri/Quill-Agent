@@ -184,7 +184,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 3px;
-  color: var(--ink-40);
+  color: var(--ink-60);
   text-align: center;
   margin: 0 0 16px;
 }
@@ -265,7 +265,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 2px;
-  color: var(--ink-40);
+  color: var(--ink-60);
   margin: 0 0 48px;
   opacity: 0;
 }
@@ -299,7 +299,7 @@
 .footerText {
   font-family: var(--sans);
   font-size: 12px;
-  color: var(--ink-40);
+  color: var(--ink-60);
   margin: 0;
 }
 

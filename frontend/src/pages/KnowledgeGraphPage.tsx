@@ -1,5 +1,5 @@
 import { useEffect, useContext, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useGraphStore } from '../stores/graphStore'
 import { useWSStore } from '../stores/wsStore'
 import { UniverseContext } from '../contexts/UniverseContext'
@@ -13,6 +13,7 @@ import styles from './KnowledgeGraphPage.module.css'
 export default function KnowledgeGraphPage() {
   const { universeId } = useParams<{ universeId: string }>()
   const { universe } = useContext(UniverseContext)
+  const navigate = useNavigate()
   const fetchGraph = useGraphStore((s) => s.fetchGraph)
   const refresh = useGraphStore((s) => s.refresh)
   const loading = useGraphStore((s) => s.loading)
@@ -44,6 +45,7 @@ export default function KnowledgeGraphPage() {
         title="No Knowledge Graph"
         message="Generate a knowledge graph from your universe entities using AI analysis to visualize character, location, and event relationships."
         cta={universe ? `Analyze "${universe.name}"` : undefined}
+        onCta={universeId ? () => navigate(`/universe/${universeId}/works`) : undefined}
       />
     )
   }

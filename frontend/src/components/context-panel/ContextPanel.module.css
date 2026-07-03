@@ -74,7 +74,7 @@
 .dismissBtn {
   background: transparent;
   border: none;
-  color: var(--ink-40);
+  color: var(--ink-60);
   font-size: 14px;
   cursor: pointer;
   padding: 0 4px;
@@ -129,7 +129,7 @@
 
 /* Empty state */
 .emptyState {
-  color: var(--ink-40);
+  color: var(--ink-60);
   font-size: 13px;
   text-align: center;
   padding: 32px 16px;

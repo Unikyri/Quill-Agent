@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"context"
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
@@ -8,9 +11,16 @@ import (
 	"github.com/quill/backend/internal/services"
 )
 
+// graphQuerier is the subset of *repositories.GraphRepo used by GraphHandler.
+// pontail: tiny interface for testability — no full repo abstraction needed.
+type graphQuerier interface {
+	FullQuery(ctx context.Context, graphName string) ([]repositories.GraphNode, []repositories.GraphEdge, error)
+	NHopTraversal(ctx context.Context, graphName string, startNodeID string, hops int) ([]repositories.GraphNode, []repositories.GraphEdge, error)
+}
+
 // GraphHandler serves graph-related REST endpoints.
 type GraphHandler struct {
-	graphRepo   *repositories.GraphRepo
+	graphRepo   graphQuerier
 	memorySvc   *services.MemoryService
 	entityRepo  *repositories.EntityRepo
 }
@@ -42,6 +52,13 @@ func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
 	graphName := "universe_" + universeID.String()
 	nodes, edges, err := h.graphRepo.FullQuery(c.Context(), graphName)
 	if err != nil {
+		// ponytail: AGE throws "graph does not exist" for new universes; return empty 200
+		if strings.Contains(err.Error(), "does not exist") {
+			return c.JSON(fiber.Map{
+				"nodes": []repositories.GraphNode{},
+				"edges": []repositories.GraphEdge{},
+			})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
 		})
@@ -88,6 +105,13 @@ func (h *GraphHandler) Neighbors(c *fiber.Ctx) error {
 	graphName := "universe_" + universeID.String()
 	nodes, edges, err := h.graphRepo.NHopTraversal(c.Context(), graphName, entityID.String(), hops)
 	if err != nil {
+		// ponytail: AGE throws "graph does not exist" for new universes; return empty 200
+		if strings.Contains(err.Error(), "does not exist") {
+			return c.JSON(fiber.Map{
+				"nodes": []repositories.GraphNode{},
+				"edges": []repositories.GraphEdge{},
+			})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
 		})

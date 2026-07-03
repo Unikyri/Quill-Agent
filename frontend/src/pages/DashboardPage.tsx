@@ -95,14 +95,21 @@ export default function DashboardPage() {
                 <option value="mystery">Mystery</option>
                 <option value="romance">Romance</option>
                 <option value="horror">Horror</option>
-                <option value="literary">Literary</option>
+                <option value="non-fiction">Non-Fiction</option>
+                <option value="thriller">Thriller</option>
+                <option value="historical">Historical</option>
+                <option value="adventure">Adventure</option>
+                <option value="comedy">Comedy</option>
+                <option value="drama">Drama</option>
               </select>
               <select className={styles.formSelect} value={format} onChange={(e) => setFormat(e.target.value)}>
                 <option value="novel">Novel</option>
                 <option value="short-story">Short Story</option>
                 <option value="screenplay">Screenplay</option>
-                <option value="comic">Comic</option>
-                <option value="interactive">Interactive</option>
+                <option value="poetry">Poetry</option>
+                <option value="essay">Essay</option>
+                <option value="article">Article</option>
+                <option value="graphic-novel">Graphic Novel</option>
               </select>
               <button className={styles.formSubmit} onClick={handleCreate}>Create</button>
               <button className={styles.formCancel} onClick={() => { setShowNewForm(false); setSubmitError(null) }}>Cancel</button>

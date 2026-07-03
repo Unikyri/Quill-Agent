@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -61,6 +63,44 @@ func TestGraphHandlerRecall(t *testing.T) {
 	}
 }
 
+func TestGraphHandlerNeighborsMissingGraph(t *testing.T) {
+	app := fiber.New()
+
+	stub := &stubGraphQuerier{errorMsg: `graph "universe_123e4567-e89b-12d3-a456-426614174000" does not exist`}
+	h := &GraphHandler{
+		graphRepo:  stub,
+		memorySvc:  services.NewMemoryService(nil, nil, nil),
+		entityRepo: repositories.NewEntityRepo(nil),
+	}
+	app.Get("/api/v1/entities/:id/neighbors", h.Neighbors)
+
+	validID := "123e4567-e89b-12d3-a456-426614174000"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+validID+"/neighbors?universe_id="+validID, nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for missing graph neighbors, got %d", resp.StatusCode)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	nodes, ok := body["nodes"]
+	if !ok {
+		t.Fatal("response missing 'nodes'")
+	}
+	edges, ok := body["edges"]
+	if !ok {
+		t.Fatal("response missing 'edges'")
+	}
+	if string(nodes) != "[]" || string(edges) != "[]" {
+		t.Errorf("expected empty arrays, got nodes=%s edges=%s", nodes, edges)
+	}
+}
+
 func TestNewGraphHandler(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
@@ -68,4 +108,56 @@ func TestNewGraphHandler(t *testing.T) {
 		}
 	}()
 	NewGraphHandler(nil, nil, nil)
+}
+
+// ── stub graph querier for testing error paths ──
+
+type stubGraphQuerier struct{ errorMsg string }
+
+func (s *stubGraphQuerier) FullQuery(_ context.Context, _ string) ([]repositories.GraphNode, []repositories.GraphEdge, error) {
+	return nil, nil, &stubQuerierErr{msg: s.errorMsg}
+}
+func (s *stubGraphQuerier) NHopTraversal(_ context.Context, _ string, _ string, _ int) ([]repositories.GraphNode, []repositories.GraphEdge, error) {
+	return nil, nil, &stubQuerierErr{msg: s.errorMsg}
+}
+
+type stubQuerierErr struct{ msg string }
+
+func (e *stubQuerierErr) Error() string { return e.msg }
+
+func TestGraphHandlerFullGraphMissingGraph(t *testing.T) {
+	app := fiber.New()
+
+	stub := &stubGraphQuerier{errorMsg: `graph "universe_123e4567-e89b-12d3-a456-426614174000" does not exist`}
+	h := &GraphHandler{
+		graphRepo:  stub,
+		memorySvc:  services.NewMemoryService(nil, nil, nil),
+		entityRepo: repositories.NewEntityRepo(nil),
+	}
+	app.Get("/api/v1/universes/:universe_id/graph", h.FullGraph)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/universes/123e4567-e89b-12d3-a456-426614174000/graph", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for missing graph, got %d", resp.StatusCode)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	nodes, ok := body["nodes"]
+	if !ok {
+		t.Fatal("response missing 'nodes'")
+	}
+	edges, ok := body["edges"]
+	if !ok {
+		t.Fatal("response missing 'edges'")
+	}
+	if string(nodes) != "[]" || string(edges) != "[]" {
+		t.Errorf("expected empty arrays, got nodes=%s edges=%s", nodes, edges)
+	}
 }
