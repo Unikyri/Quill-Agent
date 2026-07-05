@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -116,11 +117,29 @@ func (e *QuillExecutor) queryEntityGraph(argsJSON string) (string, error) {
 		return "", fmt.Errorf("query_entity_graph: list entities: %w", err)
 	}
 
+	// Resolve name -> ID, mirroring EntityService.ResolveOrCreate's
+	// "canonical name first, then aliases" order, case-insensitive
+	// throughout (parity with FindByName/FindByAlias LOWER() matching).
 	var entityID string
+	// Pass 1: canonical name.
 	for _, ent := range entities {
-		if ent.Name == args.EntityName {
+		if strings.EqualFold(ent.Name, args.EntityName) {
 			entityID = ent.ID.String()
 			break
+		}
+	}
+	// Pass 2: aliases (only if no canonical-name hit).
+	if entityID == "" {
+		for _, ent := range entities {
+			for _, alias := range ent.Aliases {
+				if strings.EqualFold(alias, args.EntityName) {
+					entityID = ent.ID.String()
+					break
+				}
+			}
+			if entityID != "" {
+				break
+			}
 		}
 	}
 	if entityID == "" {
