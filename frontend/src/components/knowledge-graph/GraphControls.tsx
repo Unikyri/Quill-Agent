@@ -1,21 +1,16 @@
 import { useGraphStore } from '../../stores/graphStore'
 import styles from './GraphCanvas.module.css'
+import { NODE_TYPE_META } from './nodeTypeMeta'
 
-const NODE_STYLES: Record<string, { color: string; icon: string }> = {
-  character: { color: '#6c5ce7', icon: '👤' },
-  location: { color: '#00b894', icon: '📍' },
-  item: { color: '#fdcb6e', icon: '🔮' },
-  event: { color: '#e17055', icon: '⚡' },
-  concept: { color: '#74b9ff', icon: '💡' },
-}
-
+// Doubles as the node-type legend: each row is both a filter toggle and a
+// color/icon key, so a separate static legend component would just duplicate this.
 export default function GraphControls() {
   const nodeFilter = useGraphStore((s) => s.nodeFilter)
   const toggleFilter = useGraphStore((s) => s.toggleFilter)
 
   return (
     <div className={styles.filterBar}>
-      {Object.entries(NODE_STYLES).map(([type, style]) => (
+      {Object.entries(NODE_TYPE_META).map(([type, meta]) => (
         <label key={type} className={styles.filterLabel}>
           <input
             type="checkbox"
@@ -23,13 +18,10 @@ export default function GraphControls() {
             onChange={() => toggleFilter(type)}
             className={styles.filterCheckbox}
           />
-          <span
-            className={styles.filterBadge}
-            style={{ background: style.color }}
-          >
-            {style.icon}
+          <span className={styles.filterBadge} style={{ background: meta.color }}>
+            {meta.icon}
           </span>
-          <span className={styles.filterText}>{type}</span>
+          <span className={styles.filterText}>{meta.label}</span>
         </label>
       ))}
     </div>

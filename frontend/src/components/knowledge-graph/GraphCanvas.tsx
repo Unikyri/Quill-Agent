@@ -10,6 +10,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css'
 import { useGraphStore } from '../../stores/graphStore'
 import CustomNode from './CustomNode'
+import { NODE_TYPE_META } from './nodeTypeMeta'
 import styles from './GraphCanvas.module.css'
 
 const nodeTypes: NodeTypes = { custom: CustomNode }
@@ -71,14 +72,7 @@ export default function GraphCanvas() {
         <MiniMap
           nodeColor={(n) => {
             const type = (n.data as { type?: string })?.type
-            const colors: Record<string, string> = {
-              character: '#6c5ce7',
-              location: '#00b894',
-              item: '#fdcb6e',
-              event: '#e17055',
-              concept: '#74b9ff',
-            }
-            return colors[type ?? ''] || '#666'
+            return NODE_TYPE_META[type ?? '']?.color || '#666'
           }}
           maskColor="rgba(0,0,0,0.6)"
           className={styles.minimap}

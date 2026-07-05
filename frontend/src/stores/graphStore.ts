@@ -1,11 +1,18 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
+import { parseVertexRaw, ENTITY_TYPES } from '../lib/graphParse'
 
 interface GraphNode {
   id: string
-  type: 'character' | 'location' | 'item' | 'event' | 'concept'
+  type: (typeof ENTITY_TYPES)[number]
   position: { x: number; y: number }
-  data: { label: string; description?: string; [key: string]: unknown }
+  data: {
+    label: string
+    description?: string
+    relevanceScore?: number
+    status?: string
+    [key: string]: unknown
+  }
 }
 
 interface GraphEdge {
@@ -30,7 +37,25 @@ interface GraphState {
   toggleFilter: (type: string) => void
 }
 
-const ALL_TYPES = ['character', 'location', 'item', 'event', 'concept']
+const ALL_TYPES = ENTITY_TYPES as unknown as string[]
+
+// ponytail: shared node-mapping used by both the initial fetch and refresh,
+// avoided duplicating the raw-agtype parsing logic a third time.
+function mapNodes(rawNodes: any[]): GraphNode[] {
+  const total = rawNodes.length || 1
+  return rawNodes.map((n: any, i: number) => {
+    const angle = (2 * Math.PI * i) / total
+    const radius = Math.max(100, total * 30)
+    const raw: string = n.properties?.raw || ''
+    const v = parseVertexRaw(raw)
+    return {
+      id: v.entityId || n.id || String(i),
+      type: v.type as GraphNode['type'],
+      position: { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius },
+      data: { label: v.name, relevanceScore: v.relevanceScore, status: v.status },
+    }
+  })
+}
 
 // ponytail: extract source/target from raw AGE edge strings like
 // [:KNOWS {source: 'id1', target: 'id2'}]
@@ -60,25 +85,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       const { nodes: rawNodes, edges: rawEdges } = await api.getGraph(universeId)
       // Transform backend {id, labels, properties} → frontend {id, type, position, data}
       // ponytail: auto-layout with circle packing; no layout lib needed for hackathon
-      const total = (rawNodes as any[]).length || 1
-      const nodes: GraphNode[] = (rawNodes as any[]).map((n: any, i: number) => {
-        const angle = (2 * Math.PI * i) / total
-        const radius = Math.max(100, total * 30)
-        const props = n.properties || {}
-        const raw: string = props.raw || ''
-        // Extract fields from raw agtype string like: {entity_id: "...", name: "...", status: "..."}
-        const nameMatch = raw.match(/name:\s*'([^']*)'/)
-        const typeMatch = raw.match(/:\s*(\w+)\s*\{/)
-        const entityID = props.entity_id || n.id || String(i)
-        const name = nameMatch?.[1] || props.name || entityID.slice(0, 8)
-        const nodeType = (typeMatch?.[1]?.toLowerCase() || n.labels?.[0]?.toLowerCase() || 'concept') as GraphNode['type']
-        return {
-          id: entityID,
-          type: nodeType,
-          position: { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius },
-          data: { label: name, description: props.description },
-        }
-      })
+      const nodes: GraphNode[] = mapNodes(rawNodes as any[])
       const edges: GraphEdge[] = (rawEdges as any[]).map((e: any) => ({
         id: e.id || `${e.source}-${e.target}`,
         source: extractEdgeSource(e),
@@ -96,24 +103,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (_universeId) {
       try {
         const { nodes: rawNodes, edges: rawEdges } = await api.getGraph(_universeId)
-        const total = (rawNodes as any[]).length || 1
-        const nodes: GraphNode[] = (rawNodes as any[]).map((n: any, i: number) => {
-          const angle = (2 * Math.PI * i) / total
-          const radius = Math.max(100, total * 30)
-          const props = n.properties || {}
-          const raw: string = props.raw || ''
-          const nameMatch = raw.match(/name:\s*'([^']*)'/)
-          const typeMatch = raw.match(/:\s*(\w+)\s*\{/)
-          const entityID = props.entity_id || n.id || String(i)
-          const name = nameMatch?.[1] || props.name || entityID.slice(0, 8)
-          const nodeType = (typeMatch?.[1]?.toLowerCase() || n.labels?.[0]?.toLowerCase() || 'concept') as GraphNode['type']
-          return {
-            id: entityID,
-            type: nodeType,
-            position: { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius },
-            data: { label: name, description: props.description },
-          }
-        })
+        const nodes: GraphNode[] = mapNodes(rawNodes as any[])
         const edges: GraphEdge[] = (rawEdges as any[]).map((e: any) => ({
           id: e.id || `${e.source}-${e.target}`,
           source: extractEdgeSource(e),

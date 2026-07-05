@@ -86,6 +86,14 @@ export const api = {
   },
   getEntity: (id: string) => request<{ entity: any }>(`/entities/${id}`),
 
+  // Neighbors in the AGE graph, 1 hop out — used by EntityCardPage for
+  // Relationships/Factions (reuses the existing /graph endpoint's raw node shape).
+  getEntityNeighbors: (id: string, universeId: string) =>
+    request<{
+      nodes: Array<{ id: string; properties: Record<string, unknown> }>
+      edges: Array<{ id: string; properties: Record<string, unknown> }>
+    }>(`/entities/${id}/neighbors?universe_id=${universeId}&hops=1`),
+
   // Health
   health: () => request<any>('/health'),
 

@@ -1,13 +1,6 @@
 import { useGraphStore } from '../../stores/graphStore'
 import styles from './GraphCanvas.module.css'
-
-const TYPE_LABELS: Record<string, string> = {
-  character: 'Character',
-  location: 'Location',
-  item: 'Item',
-  event: 'Event',
-  concept: 'Concept',
-}
+import { NODE_TYPE_META } from './nodeTypeMeta'
 
 export default function NodeDrawer() {
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
@@ -19,8 +12,10 @@ export default function NodeDrawer() {
   const node = nodes.find((n) => n.id === selectedNodeId)
   if (!node) return null
 
-  const typeLabel = TYPE_LABELS[node.type] || node.type
+  const meta = NODE_TYPE_META[node.type] || NODE_TYPE_META.character
   const description = (node.data.description as string) || ''
+  const relevanceScore = node.data.relevanceScore as number | undefined
+  const status = node.data.status as string | undefined
 
   return (
     <div className={styles.drawer}>
@@ -30,10 +25,24 @@ export default function NodeDrawer() {
           ✕
         </button>
       </div>
-      <span className={styles.drawerType}>{typeLabel}</span>
+      <span className={styles.drawerType} style={{ borderLeft: `3px solid ${meta.color}` }}>
+        {meta.icon} {meta.label}
+      </span>
+      {status && (
+        <div className={styles.drawerField}>
+          <span className={styles.drawerFieldKey}>Status</span>
+          <span className={styles.drawerFieldValue}>{status}</span>
+        </div>
+      )}
+      {typeof relevanceScore === 'number' && (
+        <div className={styles.drawerField}>
+          <span className={styles.drawerFieldKey}>Relevance</span>
+          <span className={styles.drawerFieldValue}>{Math.round(relevanceScore * 100)}%</span>
+        </div>
+      )}
       {description && <p className={styles.drawerDesc}>{description}</p>}
       {Object.entries(node.data)
-        .filter(([k]) => k !== 'label' && k !== 'description' && k !== 'type')
+        .filter(([k]) => !['label', 'description', 'type', 'relevanceScore', 'status'].includes(k))
         .map(([key, value]) => (
           <div key={key} className={styles.drawerField}>
             <span className={styles.drawerFieldKey}>{key}</span>

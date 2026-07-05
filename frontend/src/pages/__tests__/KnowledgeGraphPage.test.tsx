@@ -64,7 +64,7 @@ beforeEach(() => {
     nodes: [],
     edges: [],
     selectedNodeId: null,
-    nodeFilter: { character: true, location: true, item: true, event: true, concept: true },
+    nodeFilter: { character: true, place: true, event: true, faction: true, world_rule: true, plot_arc: true },
     loading: false,
     error: null,
     _universeId: null,
@@ -98,9 +98,9 @@ describe('KnowledgeGraphPage', () => {
     renderPage()
 
     await waitFor(() => {
-      // Filter bar with checkboxes should be visible
-      expect(screen.getByText('character')).toBeInTheDocument()
-      expect(screen.getByText('location')).toBeInTheDocument()
+      // Filter bar / legend with checkboxes should be visible
+      expect(screen.getByText('Character')).toBeInTheDocument()
+      expect(screen.getByText('Place')).toBeInTheDocument()
     })
   })
 
@@ -131,7 +131,7 @@ describe('KnowledgeGraphPage', () => {
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('character')).toBeInTheDocument()
+      expect(screen.getByText('Character')).toBeInTheDocument()
     })
     // fetchGraph called once during load
     expect(mockGetGraph).toHaveBeenCalledTimes(1)

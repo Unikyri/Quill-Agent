@@ -53,12 +53,58 @@
   min-width: 0;
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .heading {
   font-family: var(--serif);
   font-size: 32px;
   font-weight: 700;
   color: var(--ink);
   margin: 0 0 4px;
+}
+
+.statusBadge {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 4px;
+}
+
+.statusActive {
+  background: rgba(91, 122, 74, 0.15);
+  color: var(--success);
+}
+
+.statusDanger {
+  background: rgba(158, 59, 46, 0.15);
+  color: var(--danger);
+}
+
+.statusMuted {
+  background: var(--ink-10);
+  color: var(--ink-40);
+}
+
+/* Relevance bar */
+.relevanceBar {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.relevanceSegment {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ink-10);
 }
 
 .subtitle {

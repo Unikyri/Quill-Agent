@@ -13,11 +13,12 @@ function getStore() {
   return useGraphStore.getState()
 }
 
-// Backend returns {id, labels, properties} — store transforms to {id, type, position, data}
+// Backend returns {id, labels, properties: {raw}} where raw is the agtype vertex
+// text AGE actually emits, e.g. {"id":..., "label":"character", "properties":{"entity_id":"n1","name":"Alice","status":"active","relevance_score":0.7}}::vertex
 const mockBackendNodes = [
-  { id: 'n1', labels: ['Character'], properties: { raw: "n1:Character {entity_id: 'n1', name: 'Alice', status: 'active'}", entity_id: 'n1' } },
-  { id: 'n2', labels: ['Location'], properties: { raw: "n2:Location {entity_id: 'n2', name: 'Castle', status: 'active'}", entity_id: 'n2' } },
-  { id: 'n3', labels: ['Concept'], properties: { raw: "n3:Concept {entity_id: 'n3', name: 'Magic', status: 'active'}", entity_id: 'n3' } },
+  { id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice","status":"active","relevance_score":0.7}}' } },
+  { id: 'n2', properties: { raw: '{"id":2,"label":"place","properties":{"entity_id":"n2","name":"Castle","status":"active","relevance_score":0.5}}' } },
+  { id: 'n3', properties: { raw: '{"id":3,"label":"world_rule","properties":{"entity_id":"n3","name":"Magic","status":"active","relevance_score":0.3}}' } },
 ]
 
 const mockBackendEdges = [
@@ -30,7 +31,7 @@ beforeEach(() => {
     nodes: [],
     edges: [],
     selectedNodeId: null,
-    nodeFilter: { character: true, location: true, item: true, event: true, concept: true },
+    nodeFilter: { character: true, place: true, event: true, faction: true, world_rule: true, plot_arc: true },
     loading: false,
     error: null,
     _universeId: null,
@@ -47,10 +48,11 @@ describe('graphStore', () => {
     it('has all type filters enabled', () => {
       const f = getStore().nodeFilter
       expect(f.character).toBe(true)
-      expect(f.location).toBe(true)
-      expect(f.item).toBe(true)
+      expect(f.place).toBe(true)
       expect(f.event).toBe(true)
-      expect(f.concept).toBe(true)
+      expect(f.faction).toBe(true)
+      expect(f.world_rule).toBe(true)
+      expect(f.plot_arc).toBe(true)
     })
 
     it('has null selectedNodeId', () => {
@@ -76,6 +78,8 @@ describe('graphStore', () => {
       expect(nodes[0].id).toBe('n1')
       expect(nodes[0].type).toBe('character')
       expect(nodes[0].data.label).toBe('Alice')
+      expect(nodes[0].data.relevanceScore).toBe(0.7)
+      expect(nodes[0].data.status).toBe('active')
       expect(nodes[0].position).toHaveProperty('x')
       expect(nodes[0].position).toHaveProperty('y')
       expect(getStore().edges).toHaveLength(1)
@@ -102,7 +106,7 @@ describe('graphStore', () => {
       await getStore().fetchGraph('uni-1')
       vi.clearAllMocks()
 
-      const updatedNodes = [{ ...mockBackendNodes[0], properties: { ...mockBackendNodes[0].properties, raw: "n1:Character {entity_id: 'n1', name: 'Alice Updated', status: 'active'}" } }]
+      const updatedNodes = [{ ...mockBackendNodes[0], properties: { ...mockBackendNodes[0].properties, raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice Updated","status":"active","relevance_score":0.7}}' } }]
       mockGetGraph.mockResolvedValueOnce({ nodes: updatedNodes, edges: [] })
 
       await getStore().refresh()
@@ -146,8 +150,8 @@ describe('graphStore', () => {
 
     it('does not affect other filters', () => {
       getStore().toggleFilter('character')
-      expect(getStore().nodeFilter.location).toBe(true)
-      expect(getStore().nodeFilter.concept).toBe(true)
+      expect(getStore().nodeFilter.place).toBe(true)
+      expect(getStore().nodeFilter.faction).toBe(true)
     })
   })
 })
