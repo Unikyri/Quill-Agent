@@ -133,7 +133,7 @@ describe('ContradictionsPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('✓ Resolved')).toBeInTheDocument()
-      expect(mockResolveContradiction).toHaveBeenCalledWith('c1')
+      expect(mockResolveContradiction).toHaveBeenCalledWith('uni-1', 'c1')
     })
   })
 })

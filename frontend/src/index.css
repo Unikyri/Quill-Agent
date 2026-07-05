@@ -1,30 +1,48 @@
 :root {
-  /* Manuscript palette */
-  --ink: #292919;
-  --ink-80: rgba(41, 41, 25, 0.8);
-  --ink-60: rgba(41, 41, 25, 0.6);
-  --ink-40: rgba(41, 41, 25, 0.4);
-  --ink-20: rgba(41, 41, 25, 0.2);
-  --ink-10: rgba(41, 41, 25, 0.1);
-  --paper: #F7F7EE;
-  --paper-warm: #F0EDE4;
-  --paper-dark: #E8E4D9;
+  /* Manuscript palette (canonical gold/sepia) */
+  --ink: #262522;
+  --ink-80: rgba(38, 37, 34, 0.8);
+  --ink-60: rgba(38, 37, 34, 0.6);
+  --ink-40: rgba(38, 37, 34, 0.4);
+  --ink-20: rgba(38, 37, 34, 0.2);
+  --ink-10: rgba(38, 37, 34, 0.1);
+  --ink-02: rgba(38, 37, 34, 0.02);
+  --paper: #FBF6F1;
+  --paper-92: rgba(251, 246, 241, 0.92);
+  --paper-60: rgba(251, 246, 241, 0.6);
+  --paper-40: rgba(251, 246, 241, 0.4);
+  --paper-15: rgba(251, 246, 241, 0.15);
+  --paper-warm: #F1E5D1;   /* = workspaceBg */
+  --paper-dark: #EBE4D6;   /* = cardBg */
+  --gold: #BF9969;
+  --sand: #D9BD9C;
+  --stone: #D9D0C7;
+  --workspace-bg: #F1E5D1;
+  --progress-green: #5B7A4A;
 
   /* Typography */
-  --serif: 'Playfair Display', Georgia, serif;
-  --sans: 'Source Sans 3', 'Segoe UI', sans-serif;
-  --micro: 'Cormorant Garamond', Georgia, serif;
+  --serif: 'EB Garamond', Georgia, serif;   /* titles */
+  --sans: 'Lora', Georgia, serif;           /* body */
+  --micro: 'Caveat', cursive;               /* marginal */
 
   /* Semantic tokens */
   --sidebar-bg: var(--ink);
   --sidebar-text: var(--paper);
-  --card-bg: var(--paper);
+  --card-bg: #EBE4D6;
   --card-border: var(--ink-20);
-  --accent: var(--ink);
-  --accent-hover: var(--ink-80);
-  --danger: #8B0000;
-  --warning: #B8860B;
-  --success: #2E5A2E;
+  --accent: var(--gold);
+  --accent-hover: #A8894E;
+  --danger: #9E3B2E;    /* retuned brick-red, reads on cream */
+  --warning: #B37E2A;   /* warm ochre, distinct from --gold */
+  --success: #5B7A4A;   /* unified with progress-green */
+
+  /* Categorical node-type palette (Knowledge Graph) */
+  --node-character: #7A5C86;  /* plum */
+  --node-place:     #6E8B4E;  /* moss */
+  --node-event:     #C07B3A;  /* burnt orange */
+  --node-faction:   #A8894E;  /* deep gold */
+  --node-worldrule: #4E8073;  /* teal */
+  --node-plotarc:   #9C4A38;  /* terracotta */
 }
 
 /* Base styles */

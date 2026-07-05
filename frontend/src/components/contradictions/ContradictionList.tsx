@@ -10,6 +10,7 @@ export interface Contradiction {
 }
 
 interface ContradictionListProps {
+  universeId: string
   contradictions: Contradiction[]
 }
 
@@ -19,9 +20,10 @@ const SEVERITY_CLASS: Record<string, string> = {
   high: styles.severityHigh,
 }
 
-export default function ContradictionList({ contradictions }: ContradictionListProps) {
+export default function ContradictionList({ universeId, contradictions }: ContradictionListProps) {
   const [filter, setFilter] = useState<string>('all')
   const [resolved, setResolved] = useState<Set<string>>(new Set())
+  const [resolveError, setResolveError] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     return contradictions.filter((c) => {
@@ -36,15 +38,26 @@ export default function ContradictionList({ contradictions }: ContradictionListP
 
     // Optimistic local mark
     setResolved((prev) => new Set(prev).add(id))
+    setResolveError(null)
 
-    // Try backend, tolerate 404
-    await api.resolveContradiction(id)
+    try {
+      await api.resolveContradiction(universeId, id)
+    } catch (err) {
+      // Roll back optimistic update and surface the error — no silent tolerance
+      setResolved((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setResolveError((err as Error).message)
+    }
   }
 
   const severities = ['all', 'low', 'medium', 'high']
 
   return (
     <div>
+      {resolveError && <p className={styles.resolveError}>Failed to resolve: {resolveError}</p>}
       <div className={styles.filterBar}>
         {severities.map((s) => (
           <button

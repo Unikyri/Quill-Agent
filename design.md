@@ -9,21 +9,29 @@ This UI is not a typical application. It is a narrative space.
 
 ## Color System
 
-Primary Colors:
-- Ink: #292919
-- Paper: #F7F7EE
+Base:
+- Ink: #262522   Paper: #FBF6F1   Card: #EBE4D6   Workspace: #F1E5D1
+
+Accents:
+- Gold: #BF9969   Sand: #D9BD9C   Stone: #D9D0C7
+
+Semantic:
+- Danger #9E3B2E   Warning #B37E2A   Success/Progress #5B7A4A
+
+Knowledge-graph node types:
+- Character #7A5C86   Place #6E8B4E   Event #C07B3A   Faction #A8894E   WorldRule #4E8073   PlotArc #9C4A38
 
 Rules:
-- Do not introduce new colors
-- Use opacity variations instead
+- All colors live as `:root` tokens in `index.css`; components consume `var(--token)` only — never hardcode hex.
+- Opacity variants (`--ink-80`..`-10`, `--paper-60` etc.) for tints instead of new greys.
 
 ---
 
 ## Typography
 
-- Titles: Elegant serif, spacious, editorial feel
-- Body: Clean and readable
-- Microcopy: Feels like marginal notes
+- Titles: EB Garamond (`--serif`)
+- Body: Lora (`--sans`)
+- Marginal/microcopy: Caveat (`--micro`)
 
 Cursor:
 - Use a feather/quill style blinking cursor instead of a line

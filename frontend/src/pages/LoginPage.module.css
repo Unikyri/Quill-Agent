@@ -10,8 +10,8 @@
       0deg,
       transparent,
       transparent 2px,
-      rgba(41, 41, 25, 0.02) 2px,
-      rgba(41, 41, 25, 0.02) 4px
+      var(--ink-02) 2px,
+      var(--ink-02) 4px
     );
 }
 

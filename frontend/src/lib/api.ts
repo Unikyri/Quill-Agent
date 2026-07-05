@@ -91,18 +91,8 @@ export const api = {
       `/universes/${universeId}/contradictions`
     ),
 
-  // ponytail: tolerates 404 — backend may not persist resolution yet; spec says local fallback
-  resolveContradiction: async (id: string): Promise<boolean> => {
-    const token = localStorage.getItem('token')
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (token) headers['Authorization'] = `Bearer ${token}`
-
-    const res = await fetch(`${API_BASE}/contradictions/${id}/resolve`, {
-      method: 'PUT',
-      headers,
-    })
-    return res.ok || res.status === 404 // 404 = not persisted, but local fallback ok
-  },
+  resolveContradiction: (universeId: string, id: string) =>
+    request<void>(`/universes/${universeId}/contradictions/${id}/resolve`, { method: 'PUT' }),
 
   getTimeline: (universeId: string) =>
     request<{ events: Array<{ id: string; label: string; timestamp: string; description: string }> }>(

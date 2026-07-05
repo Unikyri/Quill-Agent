@@ -76,6 +76,12 @@
   border-radius: 4px;
 }
 
+.resolveError {
+  font-size: 12px;
+  color: var(--danger);
+  margin: 0 0 12px;
+}
+
 .resolveBtn {
   background: transparent;
   border: 1px solid var(--ink-20);

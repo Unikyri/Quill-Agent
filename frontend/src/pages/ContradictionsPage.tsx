@@ -50,7 +50,7 @@ export default function ContradictionsPage() {
   return (
     <div className={styles.wrap}>
       <div className={styles.listArea}>
-        <ContradictionList contradictions={contradictions} />
+        <ContradictionList universeId={universeId!} contradictions={contradictions} />
       </div>
     </div>
   )
