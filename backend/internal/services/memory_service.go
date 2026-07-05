@@ -18,6 +18,11 @@ type ResolvedEntity struct {
 	Entity      models.Entity
 	MentionText string
 	IsNew       bool
+	// PreviousStatus is the entity's status as it was in the DB before this
+	// mention's data was merged in (see EntityService.ResolveOrCreate).
+	// Deterministic contradiction checks must compare against this, not
+	// Entity.Status, which already reflects the newly-merged value.
+	PreviousStatus string
 }
 
 // MemoryService provides contextual recall by merging graph neighbourhood
@@ -108,23 +113,21 @@ func (s *MemoryService) Recall(ctx context.Context, universeID uuid.UUID, queryE
 	}
 
 	// ── 4. Freshness (vector similarity × 0.3) ──
-	for range entities {
-		if len(queryEmbedding) == 0 {
-			break
-		}
+	// FindSimilarEntity already scans every entity's embedding in the universe
+	// and returns the single closest match to queryEmbedding, so this runs once.
+	if len(queryEmbedding) > 0 {
 		matchedID, distance, err := s.vectorRepo.FindSimilarEntity(ctx, universeID, queryEmbedding, 0.8)
-		if err != nil || matchedID == nil {
-			continue
-		}
-		// Convert distance to similarity score: 1 - distance (cosine distance)
-		freshScore := (1.0 - distance) * 0.3
-		if item, exists := candidateMap[*matchedID]; exists {
-			item.Score += freshScore
-		} else {
-			candidateMap[*matchedID] = &models.RecallItem{
-				EntityID: *matchedID,
-				Score:    freshScore,
-				Source:   "freshness",
+		if err == nil && matchedID != nil {
+			// Convert distance to similarity score: 1 - distance (cosine distance)
+			freshScore := (1.0 - distance) * 0.3
+			if item, exists := candidateMap[*matchedID]; exists {
+				item.Score += freshScore
+			} else {
+				candidateMap[*matchedID] = &models.RecallItem{
+					EntityID: *matchedID,
+					Score:    freshScore,
+					Source:   "freshness",
+				}
 			}
 		}
 	}

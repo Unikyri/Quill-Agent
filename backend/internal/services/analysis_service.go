@@ -415,15 +415,16 @@ func (s *AnalysisService) extractEntities(ctx context.Context, universeID uuid.U
 			Status:      ee.Status,
 			Properties:  ee.Properties,
 		}
-		entity, isNew, err := s.entitySvc.ResolveOrCreate(ctx, universeID, entityData)
+		entity, previousStatus, isNew, err := s.entitySvc.ResolveOrCreate(ctx, universeID, entityData)
 		if err != nil {
 			log.Printf("[analysis] resolve entity %s: %v", ee.Name, err)
 			continue
 		}
 		resolved = append(resolved, ResolvedEntity{
-			Entity:      *entity,
-			MentionText: mentionText,
-			IsNew:       isNew,
+			Entity:         *entity,
+			MentionText:    mentionText,
+			IsNew:          isNew,
+			PreviousStatus: previousStatus,
 		})
 	}
 

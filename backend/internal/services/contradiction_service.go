@@ -69,9 +69,12 @@ func (s *ContradictionService) CheckDeterministic(ctx context.Context, universeI
 	for _, re := range entities {
 		e := re.Entity
 
-		// Deceased / alive check: if entity DB status is "deceased" and the
-		// new mention suggests they're alive, flag it.
-		if e.Status == "deceased" {
+		// Deceased / alive check: if entity DB status was "deceased" *before*
+		// this mention's data was merged in, and the new mention suggests
+		// they're alive, flag it. Must use PreviousStatus, not e.Status —
+		// ResolveOrCreate already overwrote Status with the newly-extracted
+		// value by the time this runs.
+		if re.PreviousStatus == "deceased" {
 			fp := s.fingerprint(ContradictionCandidate{
 				EntityID:  e.ID,
 				Type:      "deceased_alive",

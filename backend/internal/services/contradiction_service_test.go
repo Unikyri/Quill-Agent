@@ -155,9 +155,10 @@ func TestContradictionCheckDeterministicDeceasedAlive(t *testing.T) {
 	// Pass an entity marked as "alive" but the DB says "deceased"
 	entities := []ResolvedEntity{
 		{
-			Entity:     models.Entity{ID: deceasedID, UniverseID: universe.ID, Type: "character", Name: "Dead Bob", Status: "deceased"},
-			MentionText: "Bob walked into the room",
-			IsNew:       false,
+			Entity:         models.Entity{ID: deceasedID, UniverseID: universe.ID, Type: "character", Name: "Dead Bob", Status: "deceased"},
+			MentionText:    "Bob walked into the room",
+			IsNew:          false,
+			PreviousStatus: "deceased",
 		},
 	}
 
@@ -176,6 +177,66 @@ func TestContradictionCheckDeterministicDeceasedAlive(t *testing.T) {
 	}
 	if len(contradictions) > 0 && contradictions[0].Severity != "critical" {
 		t.Errorf("Contradiction severity for deceased_alive should be 'critical', got '%s'", contradictions[0].Severity)
+	}
+}
+
+// TestResolveOrCreateThenCheckDeterministicCatchesReanimation reproduces the
+// real production bug: EntityService.ResolveOrCreate merges newly-extracted
+// data (including Status) into the existing entity and persists it BEFORE
+// ContradictionService.CheckDeterministic ever inspects it. A prior version
+// of this code compared CheckDeterministic against the already-overwritten
+// Entity.Status, so the deceased/alive rule could never fire on a real
+// re-extraction. This test drives both calls in production order and asserts
+// the contradiction is still detected via ResolveOrCreate's previousStatus.
+func TestResolveOrCreateThenCheckDeterministicCatchesReanimation(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "005")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+
+	deceasedID := uuid.New()
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO entities (id, universe_id, type, name, description, status, relevance_score) VALUES ($1,$2,'character','Dead Bob','','deceased',0.8)",
+		deceasedID, universe.ID); err != nil {
+		t.Fatalf("create deceased entity: %v", err)
+	}
+
+	entityRepo := repositories.NewEntityRepo(pool)
+	contraRepo := repositories.NewContradictionRepo(pool)
+	cfg := config.Config{MaxContradictionCandidates: 3}
+	entitySvc := NewEntityService(pool, entityRepo, nil, nil)
+	contraSvc := NewContradictionService(pool, contraRepo, entityRepo, nil, nil, cfg.MaxContradictionCandidates)
+
+	// Simulate a chapter re-mentioning "Dead Bob" as active — extraction
+	// finds him by exact name match (step 1), so no qwenSvc/vectorRepo needed.
+	entity, previousStatus, isNew, err := entitySvc.ResolveOrCreate(ctx, universe.ID, repositories.ExtractedEntity{
+		Type: "character", Name: "Dead Bob", Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("ResolveOrCreate: %v", err)
+	}
+	if isNew {
+		t.Fatal("expected existing entity to be matched, not created new")
+	}
+	if entity.Status != "active" {
+		t.Errorf("merged entity Status = %q, want %q (merge should adopt new status)", entity.Status, "active")
+	}
+	if previousStatus != "deceased" {
+		t.Fatalf("previousStatus = %q, want %q — CheckDeterministic has nothing to compare against otherwise", previousStatus, "deceased")
+	}
+
+	resolved := []ResolvedEntity{
+		{Entity: *entity, MentionText: "Bob walked into the room", IsNew: isNew, PreviousStatus: previousStatus},
+	}
+
+	contradictions, err := contraSvc.CheckDeterministic(ctx, universe.ID, uuid.New(), resolved)
+	if err != nil {
+		t.Fatalf("CheckDeterministic: %v", err)
+	}
+	if len(contradictions) == 0 {
+		t.Fatal("expected deceased/alive contradiction to be detected via previousStatus, got none")
 	}
 }
 
@@ -242,9 +303,10 @@ func TestContradictionCheckDeterministicChapterThreaded(t *testing.T) {
 
 	entities := []ResolvedEntity{
 		{
-			Entity:      models.Entity{ID: deceasedID, UniverseID: universe.ID, Type: "character", Name: "Ghost Bob", Status: "deceased"},
-			MentionText: "Bob walked into the room",
-			IsNew:       false,
+			Entity:         models.Entity{ID: deceasedID, UniverseID: universe.ID, Type: "character", Name: "Ghost Bob", Status: "deceased"},
+			MentionText:    "Bob walked into the room",
+			IsNew:          false,
+			PreviousStatus: "deceased",
 		},
 	}
 

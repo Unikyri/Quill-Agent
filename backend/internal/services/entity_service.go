@@ -82,38 +82,46 @@ func (s *EntityService) Update(ctx context.Context, id uuid.UUID, input models.U
 	return e, nil
 }
 
-func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUID, data repositories.ExtractedEntity) (*models.Entity, bool, error) {
+// ResolveOrCreate finds or creates the entity matching data, merging in new
+// mention data. The returned previousStatus is the entity's status as it was
+// in the DB *before* this merge — callers doing contradiction checks (e.g.
+// deceased/alive) must compare against previousStatus, not the returned
+// entity's Status, since mergeEntity already overwrites Status with data.Status.
+// previousStatus is "" when a brand-new entity is created (step 4).
+func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUID, data repositories.ExtractedEntity) (entity *models.Entity, previousStatus string, isNew bool, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("begin transaction: %w", err)
+		return nil, "", false, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
 	// Step 1: Exact name match
 	existing, err := s.entityRepo.FindByName(ctx, universeID, data.Name)
 	if err == nil && existing != nil {
+		prevStatus := existing.Status
 		merged := s.mergeEntity(existing, data)
 		if err := s.entityRepo.Update(ctx, tx, merged); err != nil {
-			return nil, false, err
+			return nil, "", false, err
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return nil, false, err
+			return nil, "", false, err
 		}
-		return merged, false, nil
+		return merged, prevStatus, false, nil
 	}
 
 	// Step 2: Alias match
 	for _, alias := range data.Aliases {
 		existing, err = s.entityRepo.FindByAlias(ctx, universeID, alias)
 		if err == nil && existing != nil {
+			prevStatus := existing.Status
 			merged := s.mergeEntity(existing, data)
 			if err := s.entityRepo.Update(ctx, tx, merged); err != nil {
-				return nil, false, err
+				return nil, "", false, err
 			}
 			if err := tx.Commit(ctx); err != nil {
-				return nil, false, err
+				return nil, "", false, err
 			}
-			return merged, false, nil
+			return merged, prevStatus, false, nil
 		}
 	}
 
@@ -124,14 +132,15 @@ func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUI
 		if err == nil && similarID != nil {
 			existing, err = s.entityRepo.FindByID(ctx, *similarID)
 			if err == nil {
+				prevStatus := existing.Status
 				merged := s.mergeEntity(existing, data)
 				if err := s.entityRepo.Update(ctx, tx, merged); err != nil {
-					return nil, false, err
+					return nil, "", false, err
 				}
 				if err := tx.Commit(ctx); err != nil {
-					return nil, false, err
+					return nil, "", false, err
 				}
-				return merged, false, nil
+				return merged, prevStatus, false, nil
 			}
 		}
 	}
@@ -151,11 +160,11 @@ func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUI
 	}
 
 	if err := s.entityRepo.Create(ctx, tx, newEntity); err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 
 	// Create node in AGE graph
@@ -183,7 +192,7 @@ func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUI
 		}
 	}
 
-	return newEntity, true, nil
+	return newEntity, "", true, nil
 }
 
 func (s *EntityService) mergeEntity(existing *models.Entity, newData repositories.ExtractedEntity) *models.Entity {
