@@ -84,12 +84,12 @@ func main() {
 	authSvc := services.NewAuthService(userRepo, cfg)
 	universeSvc := services.NewUniverseService(pool, universeRepo, graphRepo)
 	workSvc := services.NewWorkService(pool, workRepo)
-	chapterSvc := services.NewChapterService(pool, chapterRepo)
 	entitySvc := services.NewEntityService(pool, entityRepo, vectorRepo, qwenSvc)
 	demoSvc := services.NewDemoService(pool, universeRepo, graphRepo)
 
 	// Phase 2a services
 	relevSvc := services.NewRelevanceService(pool, entityRepo, cfg.DecayLambda, cfg.ArchiveThreshold)
+	chapterSvc := services.NewChapterService(pool, chapterRepo, workRepo, relevSvc)
 	memorySvc := services.NewMemoryService(graphRepo, entityRepo, vectorRepo)
 
 	// QuillExecutor dispatches agent tool calls (vector search + graph queries)

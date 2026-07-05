@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,12 +15,16 @@ import (
 type ChapterService struct {
 	pool        *pgxpool.Pool
 	chapterRepo *repositories.ChapterRepo
+	workRepo    *repositories.WorkRepo
+	relevSvc    *RelevanceService
 }
 
-func NewChapterService(pool *pgxpool.Pool, chapterRepo *repositories.ChapterRepo) *ChapterService {
+func NewChapterService(pool *pgxpool.Pool, chapterRepo *repositories.ChapterRepo, workRepo *repositories.WorkRepo, relevSvc *RelevanceService) *ChapterService {
 	return &ChapterService{
 		pool:        pool,
 		chapterRepo: chapterRepo,
+		workRepo:    workRepo,
+		relevSvc:    relevSvc,
 	}
 }
 
@@ -52,6 +57,16 @@ func (s *ChapterService) Create(ctx context.Context, workID uuid.UUID, input mod
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// Best-effort, non-blocking: chapter creation is the "chapter advance"
+	// event that triggers relevance decay for the work's universe.
+	if s.relevSvc != nil && s.workRepo != nil {
+		if w, err := s.workRepo.FindByID(ctx, workID); err != nil {
+			log.Printf("[chapter] decay: lookup work %s: %v", workID, err)
+		} else if err := s.relevSvc.DecayAll(ctx, w.UniverseID); err != nil {
+			log.Printf("[chapter] decay universe %s: %v", w.UniverseID, err)
+		}
 	}
 
 	return c, nil

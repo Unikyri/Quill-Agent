@@ -33,7 +33,7 @@ func (r *WorkRepo) Create(ctx context.Context, tx pgx.Tx, w *models.Work) error 
 
 func (r *WorkRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Work, error) {
 	query := `
-		SELECT id, universe_id, title, type, order_index, synopsis, status, created_at, updated_at
+		SELECT id, universe_id, title, type, order_index, COALESCE(synopsis, ''), status, created_at, updated_at
 		FROM works WHERE id = $1
 	`
 	w := &models.Work{}
@@ -52,7 +52,7 @@ func (r *WorkRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Work, er
 
 func (r *WorkRepo) ListByUniverse(ctx context.Context, universeID uuid.UUID) ([]models.Work, error) {
 	query := `
-		SELECT id, universe_id, title, type, order_index, synopsis, status, created_at, updated_at
+		SELECT id, universe_id, title, type, order_index, COALESCE(synopsis, ''), status, created_at, updated_at
 		FROM works WHERE universe_id = $1
 		ORDER BY order_index ASC
 	`
