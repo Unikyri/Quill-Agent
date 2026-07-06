@@ -1,160 +1,291 @@
+/* ── ContextPanel ─────────────────────────────────────────────────── */
 .panel {
-  width: 320px;
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--bg-card);
   border-left: 1px solid var(--line);
-  padding: 16px;
-  overflow-y: auto;
-  background: var(--bg-rail);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .panelHeader {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  justify-content: space-between;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  background: var(--bg-header);
 }
 
 .panelTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-family: var(--serif);
-  font-weight: 500;
-  font-size: 16px;
-  color: var(--ink);
+  gap: 6px;
 }
 
-.statusIndicator {
-  font-size: 12px;
-}
-
-.statusOpen {
-  color: var(--success);
-}
-
-.statusReconnecting {
-  color: var(--warning);
-}
-
-.statusClosed {
-  color: var(--danger);
-}
-
-.cardCount {
+.liveIndicator {
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted-2);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--success);
+  text-transform: uppercase;
 }
 
-.cardList {
+.statusIndicator { font-size: 10px; }
+.statusOpen { color: var(--success); }
+.statusReconnecting { color: var(--warning); animation: qpulse 1.4s ease-in-out infinite; }
+.statusClosed { color: var(--muted-3); }
+
+.panelBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
-/* Card */
-.card {
+/* ── Sections that are always rendered ─────────────────────────────── */
+.section {
   background: var(--bg-card);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  padding: 12px;
-  transition: opacity 0.4s ease, transform 0.4s ease;
+  overflow: hidden;
 }
 
-.cardFading {
-  opacity: 0;
-  transform: translateX(20px);
+.sectionHeader {
+  padding: 8px 10px;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--line);
 }
 
-.cardDanger {
-  border-color: var(--danger);
+.sectionKicker {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-2);
 }
 
-.cardInfo {
-  border-color: var(--line-strong);
+.sectionBody {
+  padding: 8px 10px;
 }
 
-.cardHeader {
+/* Entity chips */
+.entityChips {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.entityChip {
+  display: inline-flex;
   align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--sans);
+  border: 1px solid transparent;
+  transition: opacity 0.15s;
+  cursor: default;
+}
+
+.entityChipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-round);
+  flex-shrink: 0;
+}
+
+/* Placeholder chip for skeleton */
+.chipSkeleton {
+  display: inline-block;
+  height: 22px;
+  width: 64px;
+  border-radius: var(--r-pill);
+}
+
+/* Contradiction section */
+.contradictionCard {
+  border: 1px solid var(--danger-border);
+  border-radius: var(--r-md);
+  background: var(--danger-bg);
+  padding: 10px 12px;
+}
+
+.contradictionKicker {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--danger);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.severityBadge {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--danger);
+  color: #fff;
+  letter-spacing: 0.06em;
+}
+
+.contradictionText {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.45;
   margin-bottom: 6px;
 }
 
-.cardTitle {
-  font-family: var(--sans);
-  font-size: 13px;
+.suggestionBox {
+  background: rgba(43, 38, 32, 0.04);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+  margin-bottom: 8px;
+}
+.suggestionKicker {
+  font-family: var(--mono);
+  font-size: 8.5px;
   font-weight: 600;
-  color: var(--ink);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin-bottom: 2px;
+}
+.suggestionText {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  line-height: 1.4;
 }
 
-.cardGlyph {
-  color: var(--muted);
-}
-
-.dismissBtn {
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-}
-
-.dismissBtn:hover {
-  color: var(--danger);
-}
-
-.cardDetail {
-  font-family: var(--sans);
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0 0 6px 0;
-  line-height: 1.5;
-}
-
-.cardFooter {
+.contradictionActions {
   display: flex;
   gap: 6px;
 }
 
-/* Badges */
-.badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.badgeNew {
-  background: var(--teal);
-  color: var(--parchment-hi);
-}
-
-/* ponytail: severity kept as semantic colors; they carry meaning beyond theme */
-.severityLow {
-  background: rgba(46, 90, 46, 0.15);
-  color: var(--success);
-}
-
-.severityMedium {
-  background: rgba(184, 134, 11, 0.15);
-  color: var(--warning);
-}
-
-.severityHigh {
-  background: rgba(139, 0, 0, 0.15);
-  color: var(--danger);
-}
-
-/* Empty state */
-.emptyState {
+.resolveBtn {
+  flex: 1;
+  padding: 5px 0;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-md);
+  font-size: 11.5px;
+  font-weight: 700;
   font-family: var(--sans);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.resolveBtn:hover { background: var(--danger-deep); }
+
+.dismissBtn {
+  flex: 1;
+  padding: 5px 0;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-  padding: 32px 16px;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.dismissBtn:hover { border-color: var(--muted); }
+
+/* Memory section */
+.memoryQuote {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 12.5px;
+  color: var(--ink-soft);
   line-height: 1.5;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.memorySource {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.memorySrc {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted-2);
+}
+
+.memoryScore {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted-3);
+}
+
+/* Graph ping */
+.graphPing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--teal-soft);
+  border: 1px solid rgba(47,93,84,.15);
+  border-radius: var(--r-md);
+}
+
+.graphPingIcon {
+  font-size: 14px;
+  color: var(--teal);
+}
+
+.graphPingText {
+  font-size: 12px;
+  color: var(--teal);
+  font-weight: 500;
+  flex: 1;
+}
+
+.graphPingDismiss {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--teal);
+  font-size: 12px;
+  border-radius: var(--r-sm);
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.graphPingDismiss:hover { opacity: 1; }
+
+/* Empty state placeholder */
+.emptyPlaceholder {
+  font-size: 12px;
+  color: var(--muted-3);
+  font-style: italic;
+  text-align: center;
+  padding: 6px 0;
+}
+
+/* Skeleton rows */
+.skRow {
+  height: 11px;
+  border-radius: var(--r-sm);
+  margin-bottom: 5px;
 }

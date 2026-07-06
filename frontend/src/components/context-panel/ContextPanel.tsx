@@ -1,6 +1,5 @@
-import { useCallback } from 'react'
 import { useWSStore, type WSStatus } from '../../stores/wsStore'
-import ContextCard from './ContextCard'
+import { NODE_TYPE_META } from '../knowledge-graph/nodeTypeMeta'
 import styles from './ContextPanel.module.css'
 
 interface ContextPanelProps {
@@ -13,102 +12,151 @@ export default function ContextPanel({ status }: ContextPanelProps) {
   const recallItems = useWSStore((s) => s.recallItems)
   const graphPings = useWSStore((s) => s.graphPings)
 
-  const dismissRecall = useCallback((id: string) => {
-    useWSStore.setState((s) => ({
-      recallItems: s.recallItems.filter((r) => r.id !== id),
-    }))
-  }, [])
-
-  const dismissContradiction = useCallback((id: string) => {
-    useWSStore.setState((s) => ({
-      contradictions: s.contradictions.filter((c) => c.id !== id),
-    }))
-  }, [])
-
-  const dismissEntity = useCallback((id: string) => {
-    useWSStore.setState((s) => ({
-      discoveredEntities: s.discoveredEntities.filter((e) => e.id !== id),
-    }))
-  }, [])
+  const dismissContradiction = (id: string) => {
+    useWSStore.setState((s) => ({ contradictions: s.contradictions.filter((c) => c.id !== id) }))
+  }
 
   const statusClass =
-    status === 'open' ? styles.statusOpen : status === 'reconnecting' ? styles.statusReconnecting : styles.statusClosed
-  const totalCards = recallItems.length + contradictions.length + discoveredEntities.length + graphPings.length
+    status === 'open' ? styles.statusOpen
+    : status === 'reconnecting' ? styles.statusReconnecting
+    : styles.statusClosed
+
+  const isConnected = status === 'open'
 
   return (
     <div className={styles.panel}>
       <div className={styles.panelHeader}>
         <h3 className={styles.panelTitle}>
-          Context Panel
-          <span className={`glyph ${styles.statusIndicator} ${statusClass}`} title={`WS: ${status}`}>
-            ●
-          </span>
+          Live Analysis
+          {isConnected && <span className={styles.liveIndicator}>● live</span>}
         </h3>
-        {totalCards > 0 && (
-          <span className={styles.cardCount}>{totalCards} active</span>
-        )}
+        <span className={`glyph ${styles.statusIndicator} ${statusClass}`} title={`WS: ${status}`}>●</span>
       </div>
 
-      <div className={styles.cardList}>
-        {totalCards === 0 && (
-          <p className={styles.emptyState}>
-            AI insights will appear here as you write
-          </p>
-        )}
-
-        {/* Contradictions first (highest priority) */}
-        {contradictions.map((c) => (
-          <ContextCard
-            key={c.id || String(Math.random())}
-            id={c.id || String(Math.random())}
-            type="contradiction"
-            title="Contradiction"
-            detail={c.message || String(c)}
-            severity={(c.severity as 'low' | 'medium' | 'high') || 'medium'}
-            onDismiss={dismissContradiction}
-          />
-        ))}
-
-        {/* New entities */}
-        {discoveredEntities.map((e) => (
-          <ContextCard
-            key={e.id || String(Math.random())}
-            id={e.id || String(Math.random())}
-            type="entity"
-            title={e.name || 'New Entity'}
-            detail={`Type: ${e.type || 'unknown'}`}
-            isNew
-            onDismiss={dismissEntity}
-          />
-        ))}
-
-        {/* Recall items */}
-        {recallItems.map((r) => (
-          <ContextCard
-            key={r.id || String(Math.random())}
-            id={r.id || String(Math.random())}
-            type="recall"
-            title={r.fact || 'Recall'}
-            detail={r.score ? `Confidence: ${(r.score * 100).toFixed(0)}%` : ''}
-            onDismiss={dismissRecall}
-          />
-        ))}
+      <div className={`${styles.panelBody} q-scroll`}>
 
         {/* Graph pings */}
         {graphPings.map((_g, i) => (
-          <ContextCard
-            key={`graph-${i}`}
-            id={`graph-${i}`}
-            type="recall"
-            title="Graph Updated"
-            detail="Knowledge graph has new connections"
-            onDismiss={() => {
-              useWSStore.setState((s) => ({
+          <div key={`graph-${i}`} className={styles.graphPing}>
+            <span className={`glyph ${styles.graphPingIcon}`}>✳</span>
+            <span className={styles.graphPingText}>Knowledge graph updated</span>
+            <button
+              className={styles.graphPingDismiss}
+              onClick={() => useWSStore.setState((s) => ({
                 graphPings: s.graphPings.filter((_, idx) => idx !== i),
-              }))
-            }}
-          />
+              }))}
+            >✕</button>
+          </div>
         ))}
+
+        {/* ── Entities in this paragraph ─ always rendered ─────────── */}
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionKicker}>Entities in this paragraph</span>
+          </div>
+          <div className={styles.sectionBody}>
+            {discoveredEntities.length === 0 ? (
+              <div className={styles.entityChips}>
+                {/* Skeleton chips when idle/loading */}
+                <div className={`skeleton ${styles.chipSkeleton}`} />
+                <div className={`skeleton ${styles.chipSkeleton}`} style={{ width: 52 }} />
+                <div className={`skeleton ${styles.chipSkeleton}`} style={{ width: 78 }} />
+              </div>
+            ) : (
+              <div className={styles.entityChips}>
+                {discoveredEntities.map((e) => {
+                  const meta = NODE_TYPE_META[e.type || ''] || NODE_TYPE_META.character
+                  return (
+                    <span
+                      key={e.id || e.name}
+                      className={styles.entityChip}
+                      style={{
+                        background: `${meta.color}18`,
+                        borderColor: `${meta.color}30`,
+                        color: meta.color,
+                      }}
+                    >
+                      <span className={styles.entityChipDot} style={{ background: meta.color }} />
+                      {e.name || 'Entity'}
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Contradiction detected ─ always rendered ─────────────── */}
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionKicker}>⚠ Contradiction detected</span>
+          </div>
+          <div className={styles.sectionBody}>
+            {contradictions.length === 0 ? (
+              <>
+                <div className={`skeleton ${styles.skRow}`} style={{ width: '90%', height: 40, marginBottom: 8 }} />
+                <div className={`skeleton ${styles.skRow}`} style={{ width: '75%', height: 32 }} />
+                <p className={styles.emptyPlaceholder} style={{ marginTop: 8 }}>
+                  AI contradiction analysis will appear here
+                </p>
+              </>
+            ) : (
+              contradictions.map((c) => (
+                <div key={c.id || String(Math.random())} className={styles.contradictionCard} style={{ marginBottom: 8 }}>
+                  <div className={styles.contradictionKicker}>
+                    Contradiction
+                    {c.severity && (
+                      <span className={styles.severityBadge}>{c.severity.toUpperCase()}</span>
+                    )}
+                  </div>
+                  <p className={styles.contradictionText}>{c.message || String(c)}</p>
+                  {(c as any).suggestion && (
+                    <div className={styles.suggestionBox}>
+                      <div className={styles.suggestionKicker}>Suggestion</div>
+                      <div className={styles.suggestionText}>{(c as any).suggestion}</div>
+                    </div>
+                  )}
+                  <div className={styles.contradictionActions}>
+                    <button className={styles.resolveBtn}>Resolve</button>
+                    <button className={styles.dismissBtn} onClick={() => dismissContradiction(c.id || '')}>
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* ── Relevant memory ─ always rendered ───────────────────── */}
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionKicker}>Relevant memory</span>
+          </div>
+          <div className={styles.sectionBody}>
+            {recallItems.length === 0 ? (
+              <>
+                <div className={`skeleton ${styles.skRow}`} style={{ height: 48, marginBottom: 6 }} />
+                <p className={styles.emptyPlaceholder}>Semantic memory appears as you write</p>
+              </>
+            ) : (
+              recallItems.map((r) => (
+                <div key={r.id || String(Math.random())} style={{ marginBottom: 8 }}>
+                  <p className={styles.memoryQuote}>"{r.fact}"</p>
+                  <div className={styles.memorySource}>
+                    <span className={styles.memorySrc}>Relevant memory</span>
+                    {r.score && (
+                      <span className={styles.memoryScore}>
+                        {(r.score * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
       </div>
     </div>
   )

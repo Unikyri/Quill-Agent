@@ -14,18 +14,21 @@ import PlotHolesPage from './pages/PlotHolesPage'
 import EditorPage from './pages/EditorPage'
 import EditorRedirect from './pages/EditorRedirect'
 import EntityRedirect from './pages/EntityRedirect'
-import WorkPage from './pages/WorkPage'
+import EntitiesPage from './pages/EntitiesPage'
 
 // ponytail: lazy-loaded — keeps landing page out of main bundle
 const LandingPage = lazy(() => import('./pages/LandingPage'))
-const EntityCardPage = lazy(() => import('./pages/EntityCardPage'))
 
-// ponytail: bare `editor`/`entities` (no id yet) just send the writer back to
-// Works to pick something — the real "no chapter/entity selected" screens are
-// part of tasks 11/12/18, not this routing pass.
+// ponytail: redirect bare `editor` (no chapter) to Works to pick one
 function ToWorks() {
   const { universeId } = useParams<{ universeId: string }>()
   return <Navigate to={`/universe/${universeId}/works`} replace />
+}
+
+// ponytail: /work/:workId still in the wild (bookmarks, emails etc) — redirects to dashboard
+// because we can't look up universeId from workId on the client alone.
+function WorkRedirect() {
+  return <Navigate to="/dashboard" replace />
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -47,16 +50,17 @@ export default function App() {
           <Route path="works" element={<UniverseWorksTab />} />
           <Route path="editor" element={<ToWorks />} />
           <Route path="editor/:chapterId" element={<EditorPage />} />
-          <Route path="entities" element={<ToWorks />} />
-          <Route path="entities/:entityId" element={<EntityCardPage />} />
+          {/* Entities — split-pane: list + optional entity detail in same component */}
+          <Route path="entities" element={<EntitiesPage />} />
+          <Route path="entities/:entityId" element={<EntitiesPage />} />
           <Route path="graph" element={<KnowledgeGraphPage />} />
           <Route path="timeline" element={<TimelinePage />} />
           <Route path="contradictions" element={<ContradictionsPage />} />
           <Route path="plot-holes" element={<PlotHolesPage />} />
           <Route path="ingest" element={<IngestPage />} />
         </Route>
-        <Route path="/work/:workId" element={<ProtectedRoute><WorkPage /></ProtectedRoute>} />
-        {/* Legacy top-level deep links — redirect into the nested shell (ADR-3, RISK-4) */}
+        {/* Legacy redirects */}
+        <Route path="/work/:workId" element={<ProtectedRoute><WorkRedirect /></ProtectedRoute>} />
         <Route path="/editor/:chapterId" element={<ProtectedRoute><EditorRedirect /></ProtectedRoute>} />
         <Route path="/entity/:entityId" element={<ProtectedRoute><EntityRedirect /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/dashboard" />} />

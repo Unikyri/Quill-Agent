@@ -9,48 +9,58 @@ import ContextPanel from '../components/context-panel/ContextPanel'
 import styles from './EditorPage.module.css'
 
 interface Chapter {
-  id: string
-  title: string
-  order_index: number
-  status: string
+  id: string; title: string; order_index: number; status: string; updated_at?: string
+}
+
+interface WorkInfo {
+  id: string; title: string; universe_id: string
 }
 
 export default function EditorPage() {
-  const { chapterId } = useParams<{ chapterId: string }>()
+  const { chapterId, universeId } = useParams<{ chapterId: string; universeId: string }>()
   const navigate = useNavigate()
   const { content, wordCount, isSaving, lastSavedAt, setContent, saveContent } = useEditorStore()
   const wsStatus = useWSStore((s) => s.status)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>()
-  const [workId, setWorkId] = useState<string>('')
-  const [universeId, setUniverseId] = useState<string>('')
+  const [workInfo, setWorkInfo] = useState<WorkInfo | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
+  const [chapterTitle, setChapterTitle] = useState('')
   const [showNewForm, setShowNewForm] = useState(false)
   const [newChapterTitle, setNewChapterTitle] = useState('')
   const [creatingChapter, setCreatingChapter] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [editorReady, setEditorReady] = useState(false)
 
   useWS()
 
+  // Load chapter data and determine workId
   useEffect(() => {
-    if (chapterId) {
-      api.getChapter(chapterId).then(({ chapter }) => {
-        setContent(chapter.content || '', chapter.raw_text || '')
-        if (chapter.work_id) setWorkId(chapter.work_id)
-        if (chapter.universe_id) setUniverseId(chapter.universe_id)
-      })
-    }
+    if (!chapterId) return
+    setEditorReady(false)
+    api.getChapter(chapterId).then(({ chapter }) => {
+      setContent(chapter.content || '', chapter.raw_text || '')
+      setChapterTitle(chapter.title || '')
+      if (chapter.work_id) {
+        api.getWork(chapter.work_id).then(({ work }) => {
+          setWorkInfo({ id: work.id, title: work.title, universe_id: work.universe_id })
+          setEditorReady(true)
+        }).catch(() => setEditorReady(true))
+      } else {
+        setEditorReady(true)
+      }
+    }).catch(() => setEditorReady(true))
   }, [chapterId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Chapter rail — sibling chapters of the same work, refetched whenever the
-  // active chapter changes so the analysis-status dot stays current.
+  // Load sibling chapters
   useEffect(() => {
-    if (!workId) return
-    api.listChapters(workId).then(({ chapters }) => setChapters(chapters || [])).catch(() => {})
-  }, [workId, chapterId])
+    if (!workInfo?.id) return
+    api.listChapters(workInfo.id)
+      .then(({ chapters }) => setChapters(chapters || []))
+      .catch(() => {})
+  }, [workInfo?.id, chapterId])
 
   const handleContentChange = useCallback((_html: string, text: string) => {
     setContent(_html, text)
-
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       if (chapterId) saveContent(chapterId)
@@ -58,37 +68,49 @@ export default function EditorPage() {
   }, [chapterId, setContent, saveContent])
 
   const handleCreateChapter = async () => {
-    if (!workId || !newChapterTitle.trim() || creatingChapter) return
-    setCreatingChapter(true)
-    setSubmitError(null)
+    if (!workInfo?.id || !newChapterTitle.trim() || creatingChapter) return
+    setCreatingChapter(true); setSubmitError(null)
     try {
-      const { chapter } = await api.createChapter(workId, { title: newChapterTitle.trim() })
-      setShowNewForm(false)
-      setNewChapterTitle('')
+      const { chapter } = await api.createChapter(workInfo.id, { title: newChapterTitle.trim() })
+      setShowNewForm(false); setNewChapterTitle('')
       navigate(`/universe/${universeId}/editor/${chapter.id}`)
     } catch (err) {
       setSubmitError((err as Error).message || 'Failed to create chapter')
-    } finally {
-      setCreatingChapter(false)
-    }
+    } finally { setCreatingChapter(false) }
   }
 
   const wsStatusClass =
-    wsStatus === 'open' ? styles.statusOpen : wsStatus === 'reconnecting' ? styles.statusWarn : styles.statusClosed
+    wsStatus === 'open' ? styles.statusOpen
+    : wsStatus === 'reconnecting' ? styles.statusWarn
+    : styles.statusClosed
+
+  const sorted = [...chapters].sort((a, b) => a.order_index - b.order_index)
 
   return (
     <div className={styles.wrap}>
-      <aside className={styles.rail}>
+      {/* Chapter rail */}
+      <aside className={styles.rail + ' q-scroll'}>
         <div className={styles.railHeader}>
-          <span className={styles.railTitle}>Chapters</span>
+          {workInfo ? (
+            <span
+              className={styles.railWorkLink}
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/universe/${universeId}/works`)}
+            >
+              {workInfo.title}
+            </span>
+          ) : (
+            <span className={styles.railWorkLink} style={{ color: 'var(--muted-3)', cursor: 'default' }}>
+              Works &amp; Chapters
+            </span>
+          )}
           <button
             className={styles.railAddBtn}
             onClick={() => setShowNewForm((v) => !v)}
             aria-label="New chapter"
             title="New chapter"
-          >
-            +
-          </button>
+          >+</button>
         </div>
 
         {showNewForm && (
@@ -107,49 +129,58 @@ export default function EditorPage() {
         )}
 
         <div className={styles.railList}>
-          {chapters
-            .slice()
-            .sort((a, b) => a.order_index - b.order_index)
-            .map((ch) => (
-              <button
-                key={ch.id}
-                className={`${styles.railItem} ${ch.id === chapterId ? styles.railItemActive : ''}`}
-                onClick={() => navigate(`/universe/${universeId}/editor/${ch.id}`)}
-              >
-                <span className={styles.railDot} data-status={ch.status} />
-                <span className={styles.railItemTitle}>{ch.title}</span>
-              </button>
-            ))}
+          {sorted.map((ch, i) => (
+            <button
+              key={ch.id}
+              className={`${styles.railItem} ${ch.id === chapterId ? styles.railItemActive : ''}`}
+              onClick={() => navigate(`/universe/${universeId}/editor/${ch.id}`)}
+            >
+              <span className={styles.railDot} data-status={ch.status} />
+              <span className={styles.railItemTitle}>{i + 1} · {ch.title}</span>
+            </button>
+          ))}
         </div>
       </aside>
 
+      {/* Editor panel */}
       <div className={styles.editorPanel}>
         <div className={styles.headerBar}>
-          <span className={styles.headerLeft}>
-            Chapter Editor
-            <span className={`${styles.wsIndicator} ${wsStatusClass}`} title={`WS: ${wsStatus}`}>
-              ●
-            </span>
-          </span>
+          <div className={styles.headerLeft}>
+            <span className={styles.headerCrumb}>{workInfo?.title || 'Work'}</span>
+            <span className={styles.headerTitle}>{chapterTitle || 'Editor'}</span>
+          </div>
           <div className={styles.headerRight}>
-            <span>{wordCount} words</span>
-            <span>{isSaving ? 'Saving…' : lastSavedAt ? `Saved ${lastSavedAt.toLocaleTimeString()}` : ''}</span>
+            <span>
+              {isSaving
+                ? <><span className={styles.savingDot} />Saving…</>
+                : lastSavedAt
+                ? <><span className={styles.savedDot} />Saved</>
+                : ''}
+            </span>
+            <span>{wordCount.toLocaleString()} words</span>
+            <span className={`glyph ${styles.wsIndicator} ${wsStatusClass}`} title={`WS: ${wsStatus}`}>●</span>
           </div>
         </div>
 
-        {chapterId && workId && universeId ? (
+        {!editorReady ? (
+          <div className={styles.loading}>Loading editor…</div>
+        ) : chapterId && workInfo ? (
           <TipTapEditor
             chapterId={chapterId}
-            workId={workId}
-            universeId={universeId}
+            workId={workInfo.id}
+            universeId={workInfo.universe_id || universeId || ''}
             initialContent={content}
             onContentChange={handleContentChange}
           />
         ) : (
-          <div className={styles.loading}>Loading editor…</div>
+          <div className={styles.noChapterState}>
+            <span className={`glyph ${styles.noChapterGlyph}`}>✎</span>
+            <p className={styles.noChapterText}>Select a chapter from the list to start writing.</p>
+          </div>
         )}
       </div>
 
+      {/* Context panel */}
       <ContextPanel status={wsStatus} />
     </div>
   )

@@ -6,7 +6,7 @@ import { useWS } from '../hooks/useWS'
 import { useAuthStore } from '../stores/authStore'
 import styles from './IngestPage.module.css'
 
-const ACCEPTED_EXTENSIONS = ['.md', '.txt']
+const ACCEPTED_EXTENSIONS = ['.md', '.txt', '.pdf', '.docx', '.doc']
 
 interface IngestJob {
   jobId: string
@@ -57,7 +57,7 @@ export default function IngestPage() {
   const handleFile = async (file: File | undefined) => {
     if (!file || !universeId) return
     if (!isAcceptedFile(file)) {
-      setError('Only .md and .txt files are supported')
+      setError('Only .md, .txt, .pdf, and .docx files are supported')
       return
     }
     setError(null)
@@ -94,7 +94,7 @@ export default function IngestPage() {
         onDrop={handleDrop}
       >
         <span className={`${styles.dropGlyph} glyph`}>⇩</span>
-        <p className={styles.dropText}>Drag a .md or .txt file here, or click to browse</p>
+        <p className={styles.dropText}>Drag a .md, .txt, .pdf, or .docx file here, or click to browse</p>
         <input
           ref={inputRef}
           type="file"

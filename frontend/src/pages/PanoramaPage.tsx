@@ -8,7 +8,8 @@ import styles from './PanoramaPage.module.css'
 interface EntitySummary { id: string; name: string; type: string }
 interface TimelineEvent { id: string; label: string; timestamp: string; description: string }
 interface Contradiction { id: string; description: string; severity: string; status: string }
-interface LatestChapter { id: string; title: string; word_count: number }
+interface PlotHole { id: string; description: string }
+interface LatestChapter { id: string; title: string; word_count: number; work_title?: string; updated_at?: string }
 
 export default function PanoramaPage() {
   const { universeId } = useParams<{ universeId: string }>()
@@ -19,77 +20,89 @@ export default function PanoramaPage() {
   const [recentEntities, setRecentEntities] = useState<EntitySummary[]>([])
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const [contradictionCount, setContradictionCount] = useState(0)
-  const [topContradiction, setTopContradiction] = useState<Contradiction | null>(null)
+  const [topContradictions, setTopContradictions] = useState<Contradiction[]>([])
   const [plotHoleCount, setPlotHoleCount] = useState(0)
+  const [topPlotHoles, setTopPlotHoles] = useState<PlotHole[]>([])
   const [latestChapter, setLatestChapter] = useState<LatestChapter | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!universeId) return
+    setLoading(true)
 
-    api.listEntities(universeId, { limit: '4' })
-      .then((res) => {
-        setEntityCount(res.pagination?.total ?? res.entities.length)
-        setRecentEntities(res.entities)
+    Promise.all([
+      api.listEntities(universeId, { limit: '4' }),
+      api.getTimeline(universeId),
+      api.getContradictions(universeId),
+      api.getPlotHoles(universeId),
+    ])
+      .then(([entRes, tlRes, contraRes, phRes]) => {
+        setEntityCount(entRes.pagination?.total ?? entRes.entities.length)
+        setRecentEntities(entRes.entities)
+        setEvents(tlRes.events || [])
+        const contras = contraRes.contradictions || []
+        setContradictionCount(contras.length)
+        setTopContradictions(contras.slice(0, 2))
+        const holes = phRes.plot_holes || []
+        setPlotHoleCount(holes.length)
+        setTopPlotHoles((holes as Array<{ id: string; description: string }>).slice(0, 1))
+        setLoading(false)
       })
-      .catch(() => {})
-
-    api.getTimeline(universeId).then((res) => setEvents(res.events || [])).catch(() => {})
-
-    api.getContradictions(universeId)
-      .then((res) => {
-        setContradictionCount(res.contradictions.length)
-        setTopContradiction(res.contradictions[0] || null)
-      })
-      .catch(() => {})
-
-    api.getPlotHoles(universeId).then((res) => setPlotHoleCount(res.plot_holes.length)).catch(() => {})
+      .catch(() => setLoading(false))
   }, [universeId])
 
   useEffect(() => {
-    // ponytail: "continue writing" picks the first work's most recent chapter.
-    // A real "most recently edited across all works" query would need a
-    // dedicated backend endpoint; this is good enough for a single-work demo.
     const firstWork = works[0]
-    if (!firstWork) {
-      setLatestChapter(null)
-      return
-    }
+    if (!firstWork) { setLatestChapter(null); return }
     api.listChapters(firstWork.id)
       .then((res) => {
         const chapters = res.chapters || []
-        const last = chapters[chapters.length - 1]
-        setLatestChapter(last ? { id: last.id, title: last.title, word_count: last.word_count } : null)
+        const sorted = [...chapters].sort((a, b) =>
+          new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        )
+        const last = sorted[0]
+        setLatestChapter(
+          last
+            ? { id: last.id, title: last.title, word_count: last.word_count, work_title: firstWork.title, updated_at: last.updated_at }
+            : null
+        )
       })
       .catch(() => setLatestChapter(null))
   }, [works])
 
+  const totalFindings = topContradictions.length + topPlotHoles.length
+
   return (
     <div className={styles.wrap}>
+      {/* Stat row */}
       <div className={styles.statGrid}>
         <div className={styles.statCard}>
-          <div className={styles.statValue}>{entityCount}</div>
+          <div className={styles.statValue}>{loading ? '—' : entityCount}</div>
           <div className={styles.statLabel}>Entities</div>
         </div>
         <div className={styles.statCard}>
-          <div className={styles.statValue}>{events.length}</div>
+          <div className={styles.statValue}>{loading ? '—' : events.length}</div>
           <div className={styles.statLabel}>Events</div>
         </div>
-        <div className={`${styles.statCard} ${styles.statCardDanger}`}>
-          <div className={`${styles.statValue} ${styles.statValueDanger}`}>{contradictionCount}</div>
-          <div className={styles.statLabelDanger}>Contradictions</div>
+        <div className={styles.statCard}>
+          <div className={loading ? styles.statValue : styles.statValueDanger}>{loading ? '—' : contradictionCount}</div>
+          <div className={loading ? styles.statLabel : styles.statLabelDanger}>Contradictions</div>
         </div>
         <div className={styles.statCard}>
-          <div className={styles.statValue}>{plotHoleCount}</div>
+          <div className={styles.statValue}>{loading ? '—' : plotHoleCount}</div>
           <div className={styles.statLabel}>Plot Holes</div>
         </div>
       </div>
 
+      {/* Continue / empty banner */}
       {latestChapter ? (
         <div className={styles.continueBanner}>
           <div>
             <div className={styles.continueKicker}>Continue where you left off</div>
-            <div className={styles.continueTitle}>{latestChapter.title}</div>
-            <div className={styles.continueMeta}>{latestChapter.word_count} words</div>
+            <div className={styles.continueTitle}>
+              {latestChapter.work_title ? `${latestChapter.work_title} — ` : ''}{latestChapter.title}
+            </div>
+            <div className={styles.continueMeta}>{latestChapter.word_count.toLocaleString()} words</div>
           </div>
           <button
             className={styles.continueBtn}
@@ -100,84 +113,188 @@ export default function PanoramaPage() {
         </div>
       ) : (
         <div className={styles.ingestCard}>
-          <p className={styles.ingestText}>No active ingestion jobs. Import a manuscript to get started.</p>
+          <p className={styles.ingestText}>
+            No active work. <strong>Import a manuscript</strong> to get started or create a new work.
+          </p>
         </div>
       )}
 
+      {/* Two-column grid */}
       <div className={styles.columns}>
+        {/* Left: entities + timeline */}
         <div className={styles.mainCol}>
           <div className={styles.card}>
             <div className={styles.cardHeader}>
-              <h3 className={styles.cardTitle}>Recent Entities</h3>
+              <span className={styles.cardTitle}>Recent Entities</span>
               <span
                 role="button"
                 tabIndex={0}
                 className={styles.cardLink}
                 onClick={() => navigate(`/universe/${universeId}/entities`)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    navigate(`/universe/${universeId}/entities`)
-                  }
-                }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/universe/${universeId}/entities`) }}
               >
                 View the encyclopedia →
               </span>
             </div>
-            <div className={styles.entityGrid}>
-              {recentEntities.map((entity) => {
-                const meta = NODE_TYPE_META[entity.type] || NODE_TYPE_META.character
-                return (
-                  <div key={entity.id} className={styles.entityRow}>
-                    <span className={styles.entitySwatch} style={{ background: meta.color }} />
-                    <div>
-                      <div className={styles.entityName}>{entity.name}</div>
-                      <div className={styles.entityType} style={{ color: meta.color }}>{meta.label.toUpperCase()}</div>
+            {loading ? (
+              <div className={styles.entityGrid}>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className={styles.entityRow}>
+                    <div className={`${styles.entitySwatch} skeleton`} />
+                    <div style={{ flex: 1 }}>
+                      <div className={`skeleton ${styles.skRow}`} style={{ width: '70%' }} />
+                      <div className={`skeleton ${styles.skRow}`} style={{ width: '40%', height: '9px' }} />
                     </div>
                   </div>
-                )
-              })}
-            </div>
+                ))}
+              </div>
+            ) : recentEntities.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', padding: '12px 0' }}>
+                No entities yet. Ingest a manuscript to populate the encyclopedia.
+              </p>
+            ) : (
+              <div className={styles.entityGrid}>
+                {recentEntities.map((entity) => {
+                  const meta = NODE_TYPE_META[entity.type] || NODE_TYPE_META.character
+                  return (
+                    <div
+                      key={entity.id}
+                      className={styles.entityRow}
+                      role="button"
+                      tabIndex={0}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/universe/${universeId}/entities/${entity.id}`)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/universe/${universeId}/entities/${entity.id}`) }}
+                    >
+                      <span className={styles.entitySwatch} style={{ background: meta.color }} />
+                      <div>
+                        <div className={styles.entityName}>{entity.name}</div>
+                        <div className={styles.entityType} style={{ color: meta.color }}>{meta.label.toUpperCase()}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           <div className={styles.card}>
             <div className={styles.cardHeader}>
-              <h3 className={styles.cardTitle}>Timeline</h3>
+              <span className={styles.cardTitle}>Timeline</span>
               <span
                 role="button"
                 tabIndex={0}
                 className={styles.cardLink}
                 onClick={() => navigate(`/universe/${universeId}/timeline`)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    navigate(`/universe/${universeId}/timeline`)
-                  }
-                }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate(`/universe/${universeId}/timeline`) }}
               >
                 View full timeline →
               </span>
             </div>
-            <div className={styles.timelineList}>
-              {events.slice(0, 3).map((event) => (
-                <div key={event.id} className={styles.timelineItem}>
-                  <div className={styles.timelineEra}>{event.timestamp}</div>
-                  <div className={styles.timelineLabel}>{event.label}</div>
-                </div>
-              ))}
-            </div>
+            {loading ? (
+              <div className={styles.timelineList}>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className={styles.timelineItem}>
+                    <div className={styles.timelineDot} style={{ background: 'var(--muted-3)' }} />
+                    <div style={{ flex: 1 }}>
+                      <div className={`skeleton ${styles.skRow}`} style={{ width: '35%', height: '9px' }} />
+                      <div className={`skeleton ${styles.skRow}`} style={{ width: '80%' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : events.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', padding: '12px 0' }}>
+                No timeline events detected yet.
+              </p>
+            ) : (
+              <div className={styles.timelineList}>
+                {events.slice(0, 3).map((event, i) => (
+                  <div key={event.id || i} className={styles.timelineItem}>
+                    <div className={styles.timelineDot} />
+                    <div className={styles.timelineContent}>
+                      <div className={styles.timelineEra}>{event.timestamp}</div>
+                      <div className={styles.timelineLabel}>{event.label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
+        {/* Right: AI panel (always visible) + ingestion */}
         <div className={styles.sideCol}>
-          {topContradiction && (
-            <div className={styles.aiCard}>
-              <h3 className={styles.aiTitle}>
-                <span className="glyph">△</span> Detected by AI
-              </h3>
-              <p className={styles.aiMessage}>{topContradiction.description}</p>
+          <div className={styles.aiCard}>
+            <div className={styles.aiCardHeader}>
+              <span className="glyph" style={{ color: 'var(--warning)', fontSize: 14 }}>△</span>
+              <span className={styles.aiTitle}>Detected by AI</span>
             </div>
-          )}
+            <div className={styles.aiSubtitle}>Quill analyzed your latest chapters.</div>
+
+            {loading ? (
+              <>
+                <div className={`skeleton ${styles.skRow}`} style={{ height: 64, marginBottom: 8 }} />
+                <div className={`skeleton ${styles.skRow}`} style={{ height: 48 }} />
+              </>
+            ) : topContradictions.length === 0 && topPlotHoles.length === 0 ? (
+              <p style={{ fontSize: 12.5, color: 'var(--muted)', fontStyle: 'italic', padding: '8px 0' }}>
+                No contradictions or loose threads detected yet. Write more chapters for AI to analyze.
+              </p>
+            ) : (
+              <>
+                {topContradictions.map((c) => (
+                  <div key={c.id} className={styles.aiItem}>
+                    <div className={styles.aiItemKicker}>Contradiction · {c.severity}</div>
+                    <div className={styles.aiItemText}>{c.description}</div>
+                  </div>
+                ))}
+                {topPlotHoles.map((p) => (
+                  <div key={p.id} className={styles.looseItem}>
+                    <div className={styles.looseItemKicker}>Plot Hole</div>
+                    <div className={styles.looseItemText}>{p.description}</div>
+                  </div>
+                ))}
+                {totalFindings > 0 && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className={styles.aiLink}
+                    onClick={() => navigate(`/universe/${universeId}/contradictions`)}
+                  >
+                    Review all {totalFindings} findings →
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Ingestion card — always shown */}
+          <div className={styles.ingestJobCard}>
+            <div className={styles.ingestJobHeader}>
+              <span className={styles.ingestJobTitle}>Ingestion</span>
+              <span
+                role="button"
+                tabIndex={0}
+                className={styles.ingestJobLink}
+                onClick={() => navigate(`/universe/${universeId}/ingest`)}
+              >
+                View →
+              </span>
+            </div>
+            {loading ? (
+              <>
+                <div className={`skeleton ${styles.skRow}`} style={{ height: 10, width: '60%', marginBottom: 8 }} />
+                <div className={styles.ingestProgressTrack}>
+                  <div className={`skeleton`} style={{ height: '100%', borderRadius: 'var(--r-pill)' }} />
+                </div>
+              </>
+            ) : (
+              <p style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '4px 0' }}>
+                No active ingestion. Upload a manuscript to extract entities and events.
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -1,221 +1,166 @@
-import { useEffect, useState, type MouseEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useUniverseStore } from '../stores/universeStore'
-import { useAuthStore } from '../stores/authStore'
+import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../lib/api'
+import { useUniverseStore } from '../stores/universeStore'
 import styles from './DashboardPage.module.css'
 
+const GENRES = [
+  { value: 'fantasy', label: 'Fantasy' },
+  { value: 'sci-fi', label: 'Sci-Fi' },
+  { value: 'mystery', label: 'Mystery' },
+  { value: 'romance', label: 'Romance' },
+  { value: 'horror', label: 'Horror' },
+  { value: 'non-fiction', label: 'Non-Fiction' },
+  { value: 'thriller', label: 'Thriller' },
+  { value: 'historical', label: 'Historical' },
+  { value: 'adventure', label: 'Adventure' },
+  { value: 'comedy', label: 'Comedy' },
+  { value: 'drama', label: 'Drama' },
+]
+
+const FORMATS = [
+  { value: 'novel', label: 'Novel' },
+  { value: 'short-story', label: 'Short Story' },
+  { value: 'screenplay', label: 'Screenplay' },
+  { value: 'poetry', label: 'Poetry' },
+  { value: 'essay', label: 'Essay' },
+  { value: 'article', label: 'Article' },
+  { value: 'graphic-novel', label: 'Graphic Novel' },
+]
+
 export default function DashboardPage() {
-  const { universes, fetchUniverses } = useUniverseStore()
-  const { user, logout } = useAuthStore()
   const navigate = useNavigate()
-
-  const [showNewForm, setShowNewForm] = useState(false)
-  const [name, setName] = useState('')
-  const [genre, setGenre] = useState('sci-fi')
-  const [format, setFormat] = useState('novel')
+  const { universes, fetchUniverses, loading } = useUniverseStore()
+  const [showCreate, setShowCreate] = useState(false)
+  const [newUniverseName, setNewUniverseName] = useState('')
+  const [newUniverseDesc, setNewUniverseDesc] = useState('')
+  const [newUniverseGenre, setNewUniverseGenre] = useState('fantasy')
+  const [newUniverseFormat, setNewUniverseFormat] = useState('novel')
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
+  const location = useLocation()
+  const isForcingNew = new URLSearchParams(location.search).get('new') === 'true'
 
-  useEffect(() => { fetchUniverses() }, [])
+  useEffect(() => {
+    fetchUniverses()
+  }, [fetchUniverses])
 
-  const handleEdit = async (e: MouseEvent, id: string, currentName: string) => {
-    e.stopPropagation()
-    const newName = window.prompt('Rename universe', currentName)
-    if (!newName || !newName.trim() || newName.trim() === currentName) return
-    try {
-      await api.updateUniverse(id, { name: newName.trim() })
-      await fetchUniverses()
-    } catch (err) {
-      setSubmitError((err as Error).message || 'Failed to rename universe')
+  useEffect(() => {
+    if (isForcingNew) {
+      setShowCreate(true)
+      return
     }
-  }
-
-  const handleDelete = async (e: MouseEvent, id: string, currentName: string) => {
-    e.stopPropagation()
-    if (!window.confirm(`Delete "${currentName}"? This cannot be undone.`)) return
-    try {
-      await api.deleteUniverse(id)
-      await fetchUniverses()
-    } catch (err) {
-      setSubmitError((err as Error).message || 'Failed to delete universe')
+    // Automatically redirect if universes exist and we are not forcing create
+    if (!loading && universes.length > 0 && !showCreate) {
+      navigate(`/universe/${universes[0].id}`, { replace: true })
+    } else if (!loading && universes.length === 0) {
+      setShowCreate(true)
     }
-  }
+  }, [loading, universes, showCreate, navigate, isForcingNew])
 
-  const filteredUniverses = universes.filter((u) =>
-    u.name.toLowerCase().includes(search.trim().toLowerCase())
-  )
-
-  const handleCreate = async () => {
-    if (!name.trim()) { setSubmitError('Name is required'); return }
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newUniverseName.trim()) return
     setSubmitError(null)
     try {
-      await api.createUniverse({ name: name.trim(), genre, format })
+      const { universe } = await api.createUniverse({
+        name: newUniverseName,
+        description: newUniverseDesc,
+        format: newUniverseFormat,
+        genre: newUniverseGenre,
+      })
       await fetchUniverses()
-      setShowNewForm(false)
-      setName('')
-      setGenre('sci-fi')
-      setFormat('novel')
+      navigate(`/universe/${universe.id}`)
     } catch (err) {
-      setSubmitError((err as Error).message || 'Failed to create universe')
+      setSubmitError((err as Error).message || 'Failed to create')
     }
+  }
+
+  if (loading || (!showCreate && universes.length > 0 && !isForcingNew)) {
+    return (
+      <div className={styles.layout}>
+        <div className={styles.loading}>Entering your universe...</div>
+      </div>
+    )
   }
 
   return (
     <div className={styles.layout}>
-      <aside className={styles.sidebar}>
-        <h1 className={styles.sidebarHeading}>Quill</h1>
-        <p className={styles.sidebarSub}>Your second brain</p>
-
-        <div className={styles.sidebarDivider} />
-
-        <div className={styles.userSection}>
-          <p className={styles.userName}>{user?.display_name}</p>
-          <p className={styles.userEmail}>{user?.email}</p>
-        </div>
-
-        <div className={styles.sidebarDivider} />
-
-        <div className={styles.stats}>
-          <div className={styles.statItem}>
-            <p className={styles.statLabel}>Universes</p>
-            <p className={styles.statValue}>{universes.length}</p>
-          </div>
-        </div>
-
-        <div className={styles.memoryBar}>
-          <p className={styles.memoryLabel}>Memory</p>
-          <div className={styles.memoryTrack}>
-            <div className={styles.memoryFill} style={{ width: '24%' }} />
-          </div>
-          <p className={styles.memoryPercent}>24 GB</p>
-        </div>
-
-        <button className={styles.logoutBtn} onClick={logout}>
-          Sign Out
-        </button>
-      </aside>
-
-      <main className={styles.main}>
-        <h2 className={styles.mainHeading}>Your Universes</h2>
-        <p className={styles.mainSub}>Worlds waiting for ink</p>
-
-        <input
-          className={styles.searchInput}
-          placeholder="⌕ Search universes…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-
-        <div className={styles.headerRow}>
-          {!showNewForm ? (
+      <div className={styles.createCard} style={{ margin: '0 auto', maxWidth: 460, marginTop: '10vh' }}>
+        <div className={styles.createHeader} style={{ marginBottom: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+          {isForcingNew && (
             <button
-              className={styles.newBtn}
-              onClick={() => setShowNewForm(true)}
+              onClick={() => navigate(`/universe/${universes[0]?.id}`)}
+              style={{ position: 'absolute', left: 0, top: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 24 }}
+              title="Cancel"
             >
-              + New Universe
+              ×
             </button>
-          ) : (
-            <div className={styles.inlineForm}>
-              <input
-                className={styles.formInput}
-                placeholder="Universe name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-              />
-              <select className={styles.formSelect} value={genre} onChange={(e) => setGenre(e.target.value)}>
-                <option value="sci-fi">Sci-Fi</option>
-                <option value="fantasy">Fantasy</option>
-                <option value="mystery">Mystery</option>
-                <option value="romance">Romance</option>
-                <option value="horror">Horror</option>
-                <option value="non-fiction">Non-Fiction</option>
-                <option value="thriller">Thriller</option>
-                <option value="historical">Historical</option>
-                <option value="adventure">Adventure</option>
-                <option value="comedy">Comedy</option>
-                <option value="drama">Drama</option>
-              </select>
-              <select className={styles.formSelect} value={format} onChange={(e) => setFormat(e.target.value)}>
-                <option value="novel">Novel</option>
-                <option value="short-story">Short Story</option>
-                <option value="screenplay">Screenplay</option>
-                <option value="poetry">Poetry</option>
-                <option value="essay">Essay</option>
-                <option value="article">Article</option>
-                <option value="graphic-novel">Graphic Novel</option>
-              </select>
-              <button className={styles.formSubmit} onClick={handleCreate}>Create</button>
-              <button className={styles.formCancel} onClick={() => { setShowNewForm(false); setSubmitError(null) }}>Cancel</button>
-            </div>
           )}
-          {submitError && <p className={styles.formError}>{submitError}</p>}
+          <div className={styles.createIcon} style={{ fontSize: 32, color: 'var(--teal)', marginBottom: 12 }}>✧</div>
+          <h2 className={styles.createTitle} style={{ fontFamily: 'var(--serif)', fontSize: 28, margin: '0 0 8px' }}>Create your first universe</h2>
+          <p className={styles.createSub} style={{ color: 'var(--muted)' }}>Give your new world a name and set its genre.</p>
         </div>
+        <form className={styles.createForm} onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Name</label>
+            <input
+              className={styles.createInput}
+              style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', fontSize: 15, width: '100%' }}
+              placeholder="Universe Name (e.g. Cosmere)"
+              value={newUniverseName}
+              onChange={(e) => setNewUniverseName(e.target.value)}
+              autoFocus
+            />
+          </div>
 
-        {universes.length === 0 ? (
-          <div className={styles.emptyCard}>
-            <p>No universes yet. Your first world awaits.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Description</label>
+            <textarea
+              className={styles.createInput}
+              style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', fontSize: 14, resize: 'vertical', width: '100%' }}
+              placeholder="Brief description (optional)"
+              value={newUniverseDesc}
+              onChange={(e) => setNewUniverseDesc(e.target.value)}
+              rows={3}
+            />
           </div>
-        ) : filteredUniverses.length === 0 ? (
-          <div className={styles.emptyCard}>
-            <p>No universes match "{search}".</p>
-          </div>
-        ) : (
-          <div className={styles.universeGrid}>
-            {filteredUniverses.map((u) => (
-              <div
-                key={u.id}
-                role="button"
-                tabIndex={0}
-                className={styles.universeCard}
-                onClick={() => navigate(`/universe/${u.id}`)}
-                onKeyDown={(e) => {
-                  if (e.target !== e.currentTarget) return
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    navigate(`/universe/${u.id}`)
-                  }
-                }}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Genre</label>
+              <select
+                value={newUniverseGenre}
+                onChange={(e) => setNewUniverseGenre(e.target.value)}
+                style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', color: 'var(--ink)', fontSize: 14, width: '100%' }}
               >
-                <div className={styles.cardHeader}>
-                  <h3 className={styles.cardTitle}>{u.name}</h3>
-                  <div className={styles.cardActions}>
-                    <button
-                      className={styles.cardActionBtn}
-                      onClick={(e) => handleEdit(e, u.id, u.name)}
-                      aria-label="Edit universe"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className={styles.cardActionBtnDanger}
-                      onClick={(e) => handleDelete(e, u.id, u.name)}
-                      aria-label="Delete universe"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                <div className={styles.cardMeta}>
-                  <span className={styles.cardMetaItem}>{u.genre}</span>
-                  <span className={styles.cardMetaItem}>{u.format}</span>
-                </div>
-                {/* ponytail: random progress for visual interest until real data exists */}
-                <div className={styles.cardProgress}>
-                  <p className={styles.cardProgressLabel}>Progress</p>
-                  <div className={styles.cardProgressTrack}>
-                    <div
-                      className={styles.cardProgressFill}
-                      style={{ width: `${(u.id.length % 40) + 20}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
+                {GENRES.map((g) => (
+                  <option key={g.value} value={g.value}>{g.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Format</label>
+              <select
+                value={newUniverseFormat}
+                onChange={(e) => setNewUniverseFormat(e.target.value)}
+                style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', color: 'var(--ink)', fontSize: 14, width: '100%' }}
+              >
+                {FORMATS.map((f) => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
-        )}
-      </main>
+
+          {submitError && <div className={styles.errorText} style={{ color: 'var(--danger)', fontSize: 13, textAlign: 'center' }}>{submitError}</div>}
+          <div className={styles.createActions} style={{ marginTop: 8 }}>
+            <button type="submit" className={styles.createBtn} disabled={!newUniverseName.trim()} style={{ width: '100%', padding: '14px', background: 'var(--teal)', color: 'var(--parchment-hi)', border: 'none', borderRadius: 'var(--r-md)', fontWeight: 600, cursor: 'pointer' }}>
+              Create Universe
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

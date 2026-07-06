@@ -106,7 +106,7 @@ export default function LoginPage() {
         </svg>
         <div className={styles.heroGradient} />
 
-        <div className={styles.heroBrand}>
+        <div className={styles.heroBrand} onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
           <span className={styles.brandMark}>Q</span>
           <h1 className={styles.brandName}>Quill</h1>
         </div>
@@ -219,12 +219,7 @@ export default function LoginPage() {
             Try the Demo
           </button>
 
-          <p className={styles.switchText}>
-            {isRegister ? 'Already have an account?' : 'First time on Quill?'}{' '}
-            <span className={styles.switchCta} onClick={() => setIsRegister(!isRegister)}>
-              {isRegister ? 'Sign in' : 'Create an account'}
-            </span>
-          </p>
+
         </div>
       </div>
     </div>

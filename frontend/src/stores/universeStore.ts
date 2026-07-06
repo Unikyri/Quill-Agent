@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
 
-interface Universe { id: string; name: string; genre: string; format: string }
+interface Universe { id: string; name: string; genre: string; format: string; description?: string }
 interface Work { id: string; title: string; type: string; order_index: number }
 interface Chapter { id: string; title: string; order_index: number; word_count: number }
 
@@ -12,6 +12,7 @@ interface UniverseState {
   currentChapter: Chapter | null
   works: Work[]
   chapters: Chapter[]
+  loading: boolean
   fetchUniverses: () => Promise<void>
   selectUniverse: (id: string) => Promise<void>
   selectWork: (id: string) => Promise<void>
@@ -26,9 +27,16 @@ export const useUniverseStore = create<UniverseState>((set) => ({
   works: [],
   chapters: [],
 
+  loading: true,
+
   fetchUniverses: async () => {
-    const { universes } = await api.listUniverses()
-    set({ universes: universes || [] })
+    set({ loading: true })
+    try {
+      const { universes } = await api.listUniverses()
+      set({ universes: universes || [], loading: false })
+    } catch {
+      set({ loading: false })
+    }
   },
 
   selectUniverse: async (id) => {
