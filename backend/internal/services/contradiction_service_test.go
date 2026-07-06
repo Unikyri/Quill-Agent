@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -512,4 +514,80 @@ type mockExecutor struct{}
 
 func (m *mockExecutor) ExecuteTool(name string, argsJSON string) (string, error) {
 	return "mock tool result", nil
+}
+
+// TestBuildEntityLinesCapsToHighestRelevance closes the verify-report's
+// CRITICAL gap: every existing CheckSemantic test above passes a nil
+// budgetMgr, so the entity-capping wiring in buildEntityLines was never
+// exercised with a real budget. This constructs a real, deliberately tiny
+// ContextBudgetManager and proves buildEntityLines (a) drops entities when
+// they don't all fit and (b) keeps the highest-RelevanceScore entities, not
+// an arbitrary subset.
+//
+// The nil-budgetMgr fallback (concatenate every entity, uncapped) is already
+// covered by TestCheckSemanticAgentLoop / TestCheckSemanticEmptyContradiction
+// above — not duplicated here.
+func TestBuildEntityLinesCapsToHighestRelevance(t *testing.T) {
+	tok := NewTokenizer()
+
+	// A long, uniform description so each entity line costs roughly the same
+	// number of tokens — makes the "which ones survive" assertion depend on
+	// RelevanceScore ranking, not incidental text-length differences.
+	const description = "A long-standing figure in the story whose history spans several chapters and countless subplots, mentioned repeatedly by name across the narrative."
+
+	makeEntity := func(name string, score float64) ResolvedEntity {
+		return ResolvedEntity{
+			Entity: models.Entity{
+				ID:             uuid.New(),
+				Type:           "character",
+				Name:           name,
+				Description:    description,
+				RelevanceScore: score,
+			},
+		}
+	}
+
+	entities := []ResolvedEntity{
+		makeEntity("HighOne", 0.95),
+		makeEntity("HighTwo", 0.90),
+		makeEntity("HighThree", 0.85),
+		makeEntity("LowOne", 0.30),
+		makeEntity("LowTwo", 0.20),
+		makeEntity("LowThree", 0.10),
+	}
+
+	// Measure a single entity line's token cost the same way buildEntityLines
+	// does, then reverse ComputeBudget's 35% split (with systemPrompt/
+	// userMessageTemplate/text all empty below, systemTokens and
+	// userBaseTokens are 0, so available == maxContextTokens) to size a
+	// budget that fits exactly the top 3 of 6 lines. perEntityTokens is large
+	// relative to the +10 slack, so a 4th line can never round its way in.
+	sample := fmt.Sprintf("- %s (%s): %s\n", entities[0].Entity.Name, entities[0].Entity.Type, entities[0].Entity.Description)
+	perEntityTokens := tok.CountTokens(sample)
+	entitiesBudget := perEntityTokens*3 + 10
+	maxContextTokens := entitiesBudget * 100 / 35
+
+	budgetMgr := NewContextBudgetManager(tok, maxContextTokens, 0)
+	svc := NewContradictionService(nil, nil, nil, nil, nil, 3, budgetMgr)
+
+	result := svc.buildEntityLines(entities, "", "%s%s", "")
+
+	lineCount := strings.Count(result, "\n")
+	if lineCount == 0 {
+		t.Fatal("expected at least one entity line in result")
+	}
+	if lineCount >= len(entities) {
+		t.Fatalf("expected fewer lines than total entities (%d) under budget pressure, got %d lines:\n%s", len(entities), lineCount, result)
+	}
+
+	for _, name := range []string{"HighOne", "HighTwo", "HighThree"} {
+		if !strings.Contains(result, name) {
+			t.Errorf("expected top-scored entity %q to survive capping, got:\n%s", name, result)
+		}
+	}
+	for _, name := range []string{"LowOne", "LowTwo", "LowThree"} {
+		if strings.Contains(result, name) {
+			t.Errorf("expected low-scored entity %q to be dropped under budget pressure, got:\n%s", name, result)
+		}
+	}
 }
