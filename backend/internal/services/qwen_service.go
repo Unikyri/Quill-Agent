@@ -74,6 +74,7 @@ type QwenRequest struct {
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 	Tools          []QwenTool      `json:"tools,omitempty"`
 	ToolChoice     interface{}     `json:"tool_choice,omitempty"`
+	Stream         bool            `json:"stream,omitempty"`
 }
 
 // ResponseFormat requests structured JSON output from the model. DashScope
