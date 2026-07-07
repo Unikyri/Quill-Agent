@@ -11,13 +11,37 @@ vi.mock('../UniverseLayout.module.css', () => ({ default: new Proxy({}, { get: (
 const mockGetUniverse = vi.fn()
 const mockListWorks = vi.fn()
 const mockListEntities = vi.fn()
+const mockGetContradictions = vi.fn()
+const mockGetPlotHoles = vi.fn()
+const mockUpdateUniverse = vi.fn()
+const mockDeleteUniverse = vi.fn()
+const mockCreateUniverse = vi.fn()
 
 vi.mock('../../lib/api', () => ({
   api: {
     getUniverse: (...args: unknown[]) => mockGetUniverse(...args),
     listWorks: (...args: unknown[]) => mockListWorks(...args),
     listEntities: (...args: unknown[]) => mockListEntities(...args),
+    getContradictions: (...args: unknown[]) => mockGetContradictions(...args),
+    getPlotHoles: (...args: unknown[]) => mockGetPlotHoles(...args),
+    updateUniverse: (...args: unknown[]) => mockUpdateUniverse(...args),
+    deleteUniverse: (...args: unknown[]) => mockDeleteUniverse(...args),
+    createUniverse: (...args: unknown[]) => mockCreateUniverse(...args),
   },
+}))
+
+const mockFetchUniverses = vi.fn()
+let universeStoreState = {
+  universes: [
+    { id: 'uni-1', name: 'Middle Earth', genre: 'Fantasy', format: 'Novel Series' },
+    { id: 'uni-2', name: 'Second World', genre: 'Sci-Fi', format: 'Novel' },
+  ],
+  fetchUniverses: mockFetchUniverses,
+}
+vi.mock('../../stores/universeStore', () => ({
+  useUniverseStore: vi.fn((selector?: (state: typeof universeStoreState) => unknown) =>
+    selector ? selector(universeStoreState) : universeStoreState
+  ),
 }))
 
 const mockLogout = vi.fn()
@@ -63,6 +87,13 @@ function renderLayout(initialRoute = '/universe/uni-1/works') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  universeStoreState = {
+    universes: [
+      { id: 'uni-1', name: 'Middle Earth', genre: 'Fantasy', format: 'Novel Series' },
+      { id: 'uni-2', name: 'Second World', genre: 'Sci-Fi', format: 'Novel' },
+    ],
+    fetchUniverses: mockFetchUniverses,
+  }
   mockGetUniverse.mockResolvedValue({
     universe: { id: 'uni-1', name: 'Middle Earth', genre: 'Fantasy', format: 'Novel Series' },
   })
@@ -73,6 +104,9 @@ beforeEach(() => {
     entities: [],
     pagination: { page: 1, limit: 1, total: 12, total_pages: 12 },
   })
+  mockGetContradictions.mockResolvedValue({ contradictions: [] })
+  mockGetPlotHoles.mockResolvedValue({ plot_holes: [] })
+  vi.stubGlobal('confirm', vi.fn(() => true))
 })
 
 describe('UniverseLayout', () => {
@@ -86,14 +120,13 @@ describe('UniverseLayout', () => {
   it('renders universe switcher card and all 9 nested shell nav items after load', async () => {
     renderLayout()
 
-    // Universe name appears in the switcher card
     await waitFor(() => {
       expect(screen.getAllByText('Middle Earth').length).toBeGreaterThanOrEqual(1)
     })
 
     expect(screen.getByText('Fantasy · 12 entities')).toBeInTheDocument()
-    expect(screen.getByText('Dashboard')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Works/ })).toBeInTheDocument()
+    expect(screen.getByText('Panorama')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Works & Chapters/ })).toBeInTheDocument()
     expect(screen.getByText('Editor')).toBeInTheDocument()
     expect(screen.getByText('Entities')).toBeInTheDocument()
     expect(screen.getByText('Graph')).toBeInTheDocument()
@@ -121,11 +154,9 @@ describe('UniverseLayout', () => {
 
     await user.click(screen.getByText('Graph'))
 
-    // Graph tab content should render
     await waitFor(() => {
       expect(screen.getByText('Graph Content')).toBeInTheDocument()
     })
-    // Works tab content should be gone
     expect(screen.queryByText('Works Content')).not.toBeInTheDocument()
   })
 
@@ -140,7 +171,7 @@ describe('UniverseLayout', () => {
     })
   })
 
-  it('clicking the universe switcher card navigates back to the dashboard', async () => {
+  it('clicking the universe switcher opens a popover listing universes, and clicking a row navigates there', async () => {
     const user = userEvent.setup()
     renderLayout()
 
@@ -149,6 +180,41 @@ describe('UniverseLayout', () => {
     })
 
     await user.click(screen.getByRole('button', { name: /Middle Earth/ }))
+
+    expect(screen.getByText('Second World')).toBeInTheDocument()
+    expect(screen.getByText(/Create New Universe/)).toBeInTheDocument()
+
+    await user.click(screen.getByText('Second World'))
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-2')
+  })
+
+  it('clicking Edit on a universe row opens the edit modal pre-filled with its name', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Middle Earth/ })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: /Middle Earth/ }))
+    await user.click(screen.getAllByTitle('Edit Universe')[0])
+
+    expect(screen.getByText('Edit Universe')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Middle Earth')).toBeInTheDocument()
+  })
+
+  it('clicking Delete on the current universe confirms, deletes, and navigates to the dashboard', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Middle Earth/ })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: /Middle Earth/ }))
+    await user.click(screen.getAllByTitle('Delete Universe')[0])
+
+    await waitFor(() => {
+      expect(mockDeleteUniverse).toHaveBeenCalledWith('uni-1')
+    })
     expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
   })
 
@@ -170,13 +236,13 @@ describe('UniverseLayout', () => {
     renderLayout()
 
     await waitFor(() => {
-      expect(screen.getByRole('link', { name: /Works/ })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /Works & Chapters/ })).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('button', { name: /Hide panel/i }))
+    await user.click(screen.getByRole('button', { name: /Hide sidebar/i }))
 
-    expect(screen.queryByRole('link', { name: /Works/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Show panel/i })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Works & Chapters/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Show sidebar/i })).toBeInTheDocument()
   })
 
   it('shows the active tab title and a recall search stub in the header', async () => {

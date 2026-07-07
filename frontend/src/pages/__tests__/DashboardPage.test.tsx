@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import DashboardPage from '../DashboardPage'
@@ -8,11 +8,10 @@ import DashboardPage from '../DashboardPage'
 vi.mock('../DashboardPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 
 const mockFetchUniverses = vi.fn()
-const universeStoreState = {
-  universes: [
-    { id: 'uni-1', name: 'World One', genre: 'fantasy', format: 'novel' },
-  ],
+let universeStoreState = {
+  universes: [] as { id: string; name: string; genre: string; format: string }[],
   fetchUniverses: mockFetchUniverses,
+  loading: false,
 }
 vi.mock('../../stores/universeStore', () => ({
   useUniverseStore: vi.fn((selector?: (state: typeof universeStoreState) => unknown) =>
@@ -20,24 +19,9 @@ vi.mock('../../stores/universeStore', () => ({
   ),
 }))
 
-const mockLogout = vi.fn()
-const authStoreState = {
-  user: { id: 'u1', email: 'writer@example.com', display_name: 'Author Name' },
-  logout: mockLogout,
-}
-vi.mock('../../stores/authStore', () => ({
-  useAuthStore: vi.fn((selector?: (state: typeof authStoreState) => unknown) =>
-    selector ? selector(authStoreState) : authStoreState
-  ),
-}))
-
-const mockUpdateUniverse = vi.fn()
-const mockDeleteUniverse = vi.fn()
 const mockCreateUniverse = vi.fn()
 vi.mock('../../lib/api', () => ({
   api: {
-    updateUniverse: (...args: unknown[]) => mockUpdateUniverse(...args),
-    deleteUniverse: (...args: unknown[]) => mockDeleteUniverse(...args),
     createUniverse: (...args: unknown[]) => mockCreateUniverse(...args),
   },
 }))
@@ -51,9 +35,9 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-function renderPage() {
+function renderPage(route = '/dashboard') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[route]}>
       <DashboardPage />
     </MemoryRouter>
   )
@@ -62,36 +46,58 @@ function renderPage() {
 describe('DashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubGlobal('prompt', vi.fn(() => null))
-    vi.stubGlobal('confirm', vi.fn(() => false))
+    universeStoreState = {
+      universes: [],
+      fetchUniverses: mockFetchUniverses,
+      loading: false,
+    }
   })
 
-  it('navigates to the universe when the card itself receives Enter', async () => {
+  it('redirects to the first universe when universes exist', async () => {
+    universeStoreState.universes = [{ id: 'uni-1', name: 'World One', genre: 'fantasy', format: 'novel' }]
     renderPage()
-    const card = screen.getByText('World One').closest('[role="button"]') as HTMLElement
-    card.focus()
-    await userEvent.keyboard('{Enter}')
-    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1')
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1', { replace: true })
+    })
   })
 
-  it('navigates when clicking a non-button descendant of the card (e.g. the title)', async () => {
+  it('shows a create-first-universe form when no universes exist', async () => {
     renderPage()
-    const user = userEvent.setup()
 
-    await user.click(screen.getByText('World One'))
-    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1')
-  })
-
-  it('does not navigate when Enter/Space is pressed on the nested Edit or Delete button', async () => {
-    renderPage()
-    const user = userEvent.setup()
-
-    screen.getByLabelText('Edit universe').focus()
-    await user.keyboard('{Enter}')
+    expect(await screen.findByText('Create your first universe')).toBeInTheDocument()
     expect(mockNavigate).not.toHaveBeenCalled()
+  })
 
-    screen.getByLabelText('Delete universe').focus()
-    await user.keyboard(' ')
-    expect(mockNavigate).not.toHaveBeenCalled()
+  it('forces the create form via ?new=true even when universes exist', async () => {
+    universeStoreState.universes = [{ id: 'uni-1', name: 'World One', genre: 'fantasy', format: 'novel' }]
+    renderPage('/dashboard?new=true')
+
+    expect(await screen.findByText('Create your first universe')).toBeInTheDocument()
+    expect(mockNavigate).not.toHaveBeenCalledWith('/universe/uni-1', { replace: true })
+  })
+
+  it('shows a loading message while universes are being fetched', () => {
+    universeStoreState.loading = true
+    renderPage()
+
+    expect(screen.getByText('Entering your universe...')).toBeInTheDocument()
+  })
+
+  it('submits the create form and navigates to the new universe', async () => {
+    mockCreateUniverse.mockResolvedValue({ universe: { id: 'uni-new' } })
+    const user = userEvent.setup()
+    renderPage()
+
+    const nameInput = await screen.findByPlaceholderText('Universe Name (e.g. Cosmere)')
+    await user.type(nameInput, 'New World')
+    await user.click(screen.getByRole('button', { name: 'Create Universe' }))
+
+    await waitFor(() => {
+      expect(mockCreateUniverse).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'New World' })
+      )
+    })
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-new')
   })
 })

@@ -135,14 +135,18 @@ describe('PanoramaPage', () => {
     expect(screen.getByText('Detected by AI')).toBeInTheDocument()
   })
 
-  it('omits the AI-detected card when there are no contradictions', async () => {
+  it('still renders the AI-detected panel with its empty-state message when there are no contradictions or plot holes', async () => {
     mockGetContradictions.mockResolvedValue({ contradictions: [] })
+    mockGetPlotHoles.mockResolvedValue({ plot_holes: [] })
     renderPage()
 
     await waitFor(() => {
       expect(screen.getByText('Entities')).toBeInTheDocument()
     })
-    expect(screen.queryByText('Detected by AI')).not.toBeInTheDocument()
+    expect(screen.getByText('Detected by AI')).toBeInTheDocument()
+    expect(
+      screen.getByText('No contradictions or loose threads detected yet. Write more chapters for AI to analyze.')
+    ).toBeInTheDocument()
   })
 
   it('shows an idle ingestion card when there are no works', async () => {
