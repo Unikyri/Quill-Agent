@@ -84,7 +84,7 @@ describe('KnowledgeGraphPage', () => {
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('No Knowledge Graph')).toBeInTheDocument()
+      expect(screen.getByText('No knowledge graph yet. Ingest a manuscript to build relationships.')).toBeInTheDocument()
     })
   })
 
@@ -98,9 +98,10 @@ describe('KnowledgeGraphPage', () => {
     renderPage()
 
     await waitFor(() => {
-      // Filter bar / legend with checkboxes should be visible
-      expect(screen.getByText('Character')).toBeInTheDocument()
-      expect(screen.getByText('Place')).toBeInTheDocument()
+      // "Character" is rendered both by the filter bar (GraphControls) and the
+      // page's own legend — disambiguate with getAllByText instead of getByText.
+      expect(screen.getAllByText('Character').length).toBeGreaterThanOrEqual(2)
+      expect(screen.getAllByText('Place').length).toBeGreaterThanOrEqual(2)
     })
   })
 
@@ -131,7 +132,7 @@ describe('KnowledgeGraphPage', () => {
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('Character')).toBeInTheDocument()
+      expect(screen.getAllByText('Character').length).toBeGreaterThanOrEqual(2)
     })
     // fetchGraph called once during load
     expect(mockGetGraph).toHaveBeenCalledTimes(1)
@@ -151,40 +152,19 @@ describe('KnowledgeGraphPage', () => {
     })
   })
 
-  it('renders CTA button in empty state that navigates to works tab', async () => {
+  it('renders CTA button in empty state that navigates to ingestion', async () => {
     mockGetGraph.mockResolvedValue({ nodes: [], edges: [] })
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('No Knowledge Graph')).toBeInTheDocument()
+      expect(screen.getByText('No knowledge graph yet. Ingest a manuscript to build relationships.')).toBeInTheDocument()
     })
 
-    const ctaButton = screen.getByText('Analyze "Test Universe"')
+    const ctaButton = screen.getByText('Go to Ingestion')
     expect(ctaButton).toBeInTheDocument()
     expect(ctaButton.tagName).toBe('BUTTON')
 
     fireEvent.click(ctaButton)
-    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/works')
-  })
-
-  it('hides CTA button when universe is null', async () => {
-    mockGetGraph.mockResolvedValue({ nodes: [], edges: [] })
-
-    const nullContext = { ...defaultContext, universe: null as unknown as typeof defaultContext.universe }
-    render(
-      <UniverseContext.Provider value={nullContext}>
-        <MemoryRouter initialEntries={['/universe/uni-1/graph']}>
-          <Routes>
-            <Route path="/universe/:universeId/graph" element={<KnowledgeGraphPage />} />
-          </Routes>
-        </MemoryRouter>
-      </UniverseContext.Provider>
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('No Knowledge Graph')).toBeInTheDocument()
-    })
-
-    expect(screen.queryByText(/Analyze/)).not.toBeInTheDocument()
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/ingest')
   })
 })

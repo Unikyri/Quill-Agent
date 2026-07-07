@@ -51,7 +51,7 @@ describe('IngestPage', () => {
 
   it('renders the dropzone', () => {
     renderPage()
-    expect(screen.getByText(/Drag a \.md or \.txt file/)).toBeInTheDocument()
+    expect(screen.getByText(/Drag a \.md, \.txt, \.pdf, or \.docx file/)).toBeInTheDocument()
   })
 
   it('rejects unsupported file types without calling the API', async () => {
@@ -63,7 +63,7 @@ describe('IngestPage', () => {
     await user.upload(input, file)
 
     expect(mockIngestDocument).not.toHaveBeenCalled()
-    expect(screen.getByText('Only .md and .txt files are supported')).toBeInTheDocument()
+    expect(screen.getByText('Only .md, .txt, .pdf, and .docx files are supported')).toBeInTheDocument()
   })
 
   it('uploads an accepted file and lists it as a job', async () => {
