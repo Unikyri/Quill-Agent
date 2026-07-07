@@ -113,6 +113,12 @@ type MemoryService struct {
 	vectorRepo        *repositories.VectorRepo
 	consolidationRepo *repositories.ConsolidationRepo
 	budgetMgr         *ContextBudgetManager
+
+	// historyRepo and relevanceDeltaEpsilon back MemoryStatus (see
+	// memory_status.go). Wired via SetHistoryRepo/SetRelevanceDeltaEpsilon,
+	// same optional-setter pattern as consolidationRepo/budgetMgr.
+	historyRepo           *repositories.EntityRelevanceHistoryRepo
+	relevanceDeltaEpsilon float64
 }
 
 // NewMemoryService creates a memory service with the given repos.

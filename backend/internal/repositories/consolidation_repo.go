@@ -96,6 +96,33 @@ func (r *ConsolidationRepo) FindSimilarByEmbedding(ctx context.Context, universe
 	return hits, nil
 }
 
+// EntityIDsWithConsolidation returns the IDs of entities in the given
+// universe that have a consolidated_memories row — i.e. archived entities
+// whose memory has already been summarized/consolidated.
+func (r *ConsolidationRepo) EntityIDsWithConsolidation(ctx context.Context, universeID uuid.UUID) ([]uuid.UUID, error) {
+	query := `
+		SELECT cm.entity_id
+		FROM consolidated_memories cm
+		JOIN entities e ON cm.entity_id = e.id
+		WHERE e.universe_id = $1
+	`
+	rows, err := r.pool.Query(ctx, query, universeID)
+	if err != nil {
+		return nil, fmt.Errorf("list consolidated entity ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan consolidated entity id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 // DeleteByEntityID removes the consolidated memory row for a given entity.
 // spec: idempotent — no error when no row exists.
 func (r *ConsolidationRepo) DeleteByEntityID(ctx context.Context, entityID uuid.UUID) error {

@@ -31,6 +31,7 @@ type Config struct {
 	QwenHealthTimeout    time.Duration
 	DecayLambda              float64
 	ArchiveThreshold         float64
+	RelevanceDeltaEpsilon    float64
 	PlotHoleChapters         int
 	MaxContradictionCandidates int
 	WSEnabled                bool
@@ -63,6 +64,7 @@ func Load() (*Config, error) {
 		QwenHealthTimeout:         time.Duration(getEnvInt("QWEN_HEALTH_TIMEOUT_SECONDS", 5)) * time.Second,
 		DecayLambda:               getEnvFloat("DECAY_LAMBDA", 0.1),
 		ArchiveThreshold:          getEnvFloat("ARCHIVE_THRESHOLD", 0.15),
+		RelevanceDeltaEpsilon:     getEnvFloat("RELEVANCE_DELTA_EPSILON", 0.01),
 		PlotHoleChapters:          getEnvInt("PLOT_HOLE_CHAPTERS", 8),
 		MaxContradictionCandidates: getEnvInt("MAX_CONTRADICTION_CANDIDATES", 3),
 		WSEnabled:                 getEnvBool("QUILL_WS_ENABLED", true),

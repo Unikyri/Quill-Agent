@@ -101,6 +101,8 @@ func main() {
 	memorySvc := services.NewMemoryService(graphRepo, entityRepo, vectorRepo)
 	memorySvc.SetConsolidationRepo(consolidationRepo)
 	memorySvc.SetBudgetMgr(budgetMgr)
+	memorySvc.SetHistoryRepo(repositories.NewEntityRelevanceHistoryRepo(pool))
+	memorySvc.SetRelevanceDeltaEpsilon(cfg.RelevanceDeltaEpsilon)
 
 	// QuillExecutor dispatches agent tool calls (vector search + graph queries)
 	// to the appropriate repos. UniverseID is set per-call by the agent loop.
@@ -207,6 +209,7 @@ func main() {
 	api.Get("/universes/:universe_id/graph", graphH.FullGraph)
 	api.Get("/entities/:id/neighbors", graphH.Neighbors)
 	api.Post("/universes/:id/recall", graphH.Recall)
+	api.Get("/universes/:id/memory-status", graphH.MemoryStatus)
 	api.Post("/universes/:id/ingest", ingestionH.Ingest)
 
 	// WebSocket route (gated by config)

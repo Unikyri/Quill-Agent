@@ -170,4 +170,25 @@ func (h *GraphHandler) Recall(c *fiber.Ctx) error {
 	})
 }
 
+// MemoryStatus returns per-entity relevance history and derived lifecycle
+// state for a universe, feeding the frontend's entity lifecycle sparkline.
+// GET /api/v1/universes/:id/memory-status
+func (h *GraphHandler) MemoryStatus(c *fiber.Ctx) error {
+	universeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
+		})
+	}
+
+	status, err := h.memorySvc.MemoryStatus(c.Context(), universeID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(status)
+}
+
 

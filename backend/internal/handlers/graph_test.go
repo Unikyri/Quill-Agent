@@ -63,6 +63,21 @@ func TestGraphHandlerRecall(t *testing.T) {
 	}
 }
 
+func TestGraphHandlerMemoryStatusInvalidID(t *testing.T) {
+	app := fiber.New()
+	h := NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil))
+	app.Get("/api/v1/universes/:id/memory-status", h.MemoryStatus)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/universes/bad/memory-status", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestGraphHandlerNeighborsMissingGraph(t *testing.T) {
 	app := fiber.New()
 
