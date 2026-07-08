@@ -348,17 +348,11 @@ func (s *MemoryService) RecallExplain(ctx context.Context, universeID uuid.UUID,
 
 	var budget BudgetReport
 	if s.budgetMgr != nil {
-		alloc := s.budgetMgr.ComputeBudget(0, 0)
-
 		ranked := make([]RankedItem, len(items))
 		for i := range items {
 			ranked[i] = RankedItem{Text: items[i].Fact, Score: items[i].RRFScore}
 		}
-		fitted, _, _ := s.budgetMgr.FitToBudget(ranked, alloc.VectorTokens)
-		survivors := make(map[string]bool, len(fitted))
-		for _, f := range fitted {
-			survivors[f.Text] = true
-		}
+		survivors, alloc := s.budgetSurvivors(ranked)
 		for i := range items {
 			items[i].FitInBudget = survivors[items[i].Fact]
 		}
@@ -497,25 +491,37 @@ func extractEntityIDFromNode(nodeStr string) (uuid.UUID, bool) {
 	return id, true
 }
 
-// fitToBudget trims the fused, ranked list to BudgetAllocation.VectorTokens
-// via ContextBudgetManager.FitToBudget, mapping RankedItem.Text back to its
-// HybridRecallItem by Fact (ADR-4: assumes near-unique facts per call).
-func (s *MemoryService) fitToBudget(fused []HybridRecallItem) []HybridRecallItem {
+// budgetSurvivors computes which items (keyed by RankedItem.Text) survive the
+// BudgetAllocation.VectorTokens slice of the context budget, and returns the
+// allocation used. It is the single home of the budget-fit recipe shared by
+// fitToBudget (which DROPS non-survivors from the recall path) and
+// RecallExplain (which FLAGS them via FitInBudget), so the two can never drift
+// (ADR-4: assumes near-unique facts per call). Callers guarantee budgetMgr != nil.
+func (s *MemoryService) budgetSurvivors(ranked []RankedItem) (map[string]bool, BudgetAllocation) {
 	alloc := s.budgetMgr.ComputeBudget(0, 0)
+	fitted, _, _ := s.budgetMgr.FitToBudget(ranked, alloc.VectorTokens)
+	survivors := make(map[string]bool, len(fitted))
+	for _, f := range fitted {
+		survivors[f.Text] = true
+	}
+	return survivors, alloc
+}
 
+// fitToBudget drops fused items that don't fit the VectorTokens budget,
+// preserving the fused (RRF) order of the survivors — deterministic on score
+// ties, unlike re-emitting the internally re-sorted fitted list.
+func (s *MemoryService) fitToBudget(fused []HybridRecallItem) []HybridRecallItem {
 	ranked := make([]RankedItem, len(fused))
-	byFact := make(map[string]*HybridRecallItem, len(fused))
 	for i := range fused {
 		ranked[i] = RankedItem{Text: fused[i].Fact, Score: fused[i].RRFScore}
-		byFact[fused[i].Fact] = &fused[i]
 	}
 
-	fitted, _, _ := s.budgetMgr.FitToBudget(ranked, alloc.VectorTokens)
+	survivors, _ := s.budgetSurvivors(ranked)
 
-	result := make([]HybridRecallItem, 0, len(fitted))
-	for _, r := range fitted {
-		if item, ok := byFact[r.Text]; ok {
-			result = append(result, *item)
+	result := make([]HybridRecallItem, 0, len(fused))
+	for i := range fused {
+		if survivors[fused[i].Fact] {
+			result = append(result, fused[i])
 		}
 	}
 	return result
