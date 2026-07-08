@@ -1,3 +1,5 @@
+import type { MemoryStatusEntity } from './types'
+
 const API_BASE = '/api/v1'
 
 interface RequestOptions extends RequestInit {
@@ -176,17 +178,13 @@ export const api = {
   getMemoryStatus: (universeId: string) =>
     request<{
       consolidated_count: number
-      entities: Array<{
-        id: string
-        name: string
-        type: string
-        relevance_score: number
-        status: string
-        consolidated: boolean
-        lifecycle: 'active' | 'decaying' | 'archived' | 'consolidated' | 'reactivated'
-        history: Array<{ score: number; recorded_at: string }>
-      }>
+      entities: MemoryStatusEntity[]
     }>(`/universes/${universeId}/memory-status`),
+
+  // Slice A trigger endpoint — advances decay for the universe; caller
+  // refetches getMemoryStatus to observe the drop (design obs #265).
+  runDecay: (universeId: string) =>
+    request<{ ok: boolean }>(`/universes/${universeId}/decay`, { method: 'POST' }),
 
   // Ingestion — multipart upload, bypasses `request()`'s JSON body handling
   // since the browser must set its own `Content-Type: multipart/form-data`
