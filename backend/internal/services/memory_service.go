@@ -98,6 +98,12 @@ type ResolvedEntity struct {
 // recency-ranked) entity IDs seed the graph pipeline's neighbor lookup.
 const graphSeedCap = 5
 
+// pipelineSet holds the five independently-ranked pipeline outputs produced
+// by runPipelines, before RRF fusion.
+type pipelineSet struct {
+	Vector, Graph, Recency, Keyword, Consolidated []rankedEntry
+}
+
 // MemoryService provides contextual recall by fusing up to four
 // independently-ranked pipelines (vector similarity, graph context,
 // recency/keyword, consolidated memories) via Reciprocal Rank Fusion.
@@ -163,9 +169,34 @@ func (s *MemoryService) Recall(ctx context.Context, universeID uuid.UUID, queryE
 // consolidated pipelines are skipped; the graph pipeline instead seeds from
 // the top graphSeedCap recency-ranked active entities.
 func (s *MemoryService) RecallWithQuery(ctx context.Context, universeID uuid.UUID, queryEmbedding []float32, queryText string, k int) ([]models.RecallItem, error) {
+	ps, err := s.runPipelines(ctx, universeID, queryEmbedding, queryText, k)
+	if err != nil {
+		return nil, err
+	}
+
+	fused := fuseRRF(ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated)
+
+	if s.budgetMgr != nil {
+		fused = s.fitToBudget(fused)
+	}
+
+	if k > 0 && len(fused) > k {
+		fused = fused[:k]
+	}
+
+	return s.toRecallItems(fused), nil
+}
+
+// runPipelines fans out the vector, graph, recency, keyword, and
+// consolidated-memory pipelines for a recall query, honoring the same
+// normal/degraded-mode seeding and nil-guard rules as RecallWithQuery (see
+// its doc comment). All goroutines are joined (wg.Wait()) before returning,
+// so callers observe the same happens-before guarantees RecallWithQuery
+// always had.
+func (s *MemoryService) runPipelines(ctx context.Context, universeID uuid.UUID, queryEmbedding []float32, queryText string, k int) (pipelineSet, error) {
 	entities, err := s.entityRepo.ListByUniverseActive(ctx, universeID)
 	if err != nil {
-		return nil, fmt.Errorf("recall: list active entities: %w", err)
+		return pipelineSet{}, fmt.Errorf("recall: list active entities: %w", err)
 	}
 
 	hasEmbedding := len(queryEmbedding) > 0
@@ -251,16 +282,18 @@ func (s *MemoryService) RecallWithQuery(ctx context.Context, universeID uuid.UUI
 
 	wg.Wait()
 
-	fused := fuseRRF(vectorRanked, graphRanked, recencyRanked, keywordRanked, consolidatedRanked)
+	return pipelineSet{
+		Vector:       vectorRanked,
+		Graph:        graphRanked,
+		Recency:      recencyRanked,
+		Keyword:      keywordRanked,
+		Consolidated: consolidatedRanked,
+	}, nil
+}
 
-	if s.budgetMgr != nil {
-		fused = s.fitToBudget(fused)
-	}
-
-	if k > 0 && len(fused) > k {
-		fused = fused[:k]
-	}
-
+// toRecallItems maps fused, ranked HybridRecallItems to the API-facing
+// models.RecallItem shape, joining multi-pipeline Sources with a comma.
+func (s *MemoryService) toRecallItems(fused []HybridRecallItem) []models.RecallItem {
 	items := make([]models.RecallItem, len(fused))
 	for i, f := range fused {
 		items[i] = models.RecallItem{
@@ -271,7 +304,75 @@ func (s *MemoryService) RecallWithQuery(ctx context.Context, universeID uuid.UUI
 			Source:   strings.Join(f.Sources, ","),
 		}
 	}
-	return items, nil
+	return items
+}
+
+// RecallExplanation is the full explain-mode response for
+// /recall/explain: the fused, ranked items each carrying a per-pipeline RRF
+// contribution ledger, plus the raw per-pipeline result counts and the
+// context-budget report used to compute FitInBudget.
+type RecallExplanation struct {
+	Query         string          `json:"query"`
+	PipelineSizes map[string]int  `json:"pipeline_sizes"`
+	Items         []ExplainedItem `json:"items"`
+	Budget        BudgetReport    `json:"budget"`
+}
+
+// RecallExplain is the explain-mode counterpart to RecallWithQuery: it fuses
+// the same five pipelines via fuseRRFExplain (recording a full contribution
+// ledger per item instead of collapsing straight to models.RecallItem),
+// always reports all 5 PipelineSizes keys (0 for skipped/empty pipelines),
+// and marks FitInBudget per item against the real budget report. When
+// budgetMgr is nil, every item reports FitInBudget=true and Budget is the
+// zero value — it never panics (mirrors RecallWithQuery's nil-guard).
+func (s *MemoryService) RecallExplain(ctx context.Context, universeID uuid.UUID, queryEmbedding []float32, queryText string, k int) (RecallExplanation, error) {
+	ps, err := s.runPipelines(ctx, universeID, queryEmbedding, queryText, k)
+	if err != nil {
+		return RecallExplanation{}, err
+	}
+
+	pairs := []namedPipeline{
+		{Name: "vector", Entries: ps.Vector},
+		{Name: "graph", Entries: ps.Graph},
+		{Name: "recency", Entries: ps.Recency},
+		{Name: "keyword", Entries: ps.Keyword},
+		{Name: "consolidated", Entries: ps.Consolidated},
+	}
+
+	items := fuseRRFExplain(pairs)
+
+	pipelineSizes := make(map[string]int, len(pairs))
+	for _, p := range pairs {
+		pipelineSizes[p.Name] = len(p.Entries)
+	}
+
+	var budget BudgetReport
+	if s.budgetMgr != nil {
+		ranked := make([]RankedItem, len(items))
+		for i := range items {
+			ranked[i] = RankedItem{Text: items[i].Fact, Score: items[i].RRFScore}
+		}
+		survivors, alloc := s.budgetSurvivors(ranked)
+		for i := range items {
+			items[i].FitInBudget = survivors[items[i].Fact]
+		}
+		budget = alloc.Report(s.budgetMgr.maxContextTokens)
+	} else {
+		for i := range items {
+			items[i].FitInBudget = true
+		}
+	}
+
+	if k > 0 && len(items) > k {
+		items = items[:k]
+	}
+
+	return RecallExplanation{
+		Query:         queryText,
+		PipelineSizes: pipelineSizes,
+		Items:         items,
+		Budget:        budget,
+	}, nil
 }
 
 // vectorPipelineAndSeeds runs the vector-similarity pipeline and derives
@@ -390,25 +491,37 @@ func extractEntityIDFromNode(nodeStr string) (uuid.UUID, bool) {
 	return id, true
 }
 
-// fitToBudget trims the fused, ranked list to BudgetAllocation.VectorTokens
-// via ContextBudgetManager.FitToBudget, mapping RankedItem.Text back to its
-// HybridRecallItem by Fact (ADR-4: assumes near-unique facts per call).
-func (s *MemoryService) fitToBudget(fused []HybridRecallItem) []HybridRecallItem {
+// budgetSurvivors computes which items (keyed by RankedItem.Text) survive the
+// BudgetAllocation.VectorTokens slice of the context budget, and returns the
+// allocation used. It is the single home of the budget-fit recipe shared by
+// fitToBudget (which DROPS non-survivors from the recall path) and
+// RecallExplain (which FLAGS them via FitInBudget), so the two can never drift
+// (ADR-4: assumes near-unique facts per call). Callers guarantee budgetMgr != nil.
+func (s *MemoryService) budgetSurvivors(ranked []RankedItem) (map[string]bool, BudgetAllocation) {
 	alloc := s.budgetMgr.ComputeBudget(0, 0)
+	fitted, _, _ := s.budgetMgr.FitToBudget(ranked, alloc.VectorTokens)
+	survivors := make(map[string]bool, len(fitted))
+	for _, f := range fitted {
+		survivors[f.Text] = true
+	}
+	return survivors, alloc
+}
 
+// fitToBudget drops fused items that don't fit the VectorTokens budget,
+// preserving the fused (RRF) order of the survivors — deterministic on score
+// ties, unlike re-emitting the internally re-sorted fitted list.
+func (s *MemoryService) fitToBudget(fused []HybridRecallItem) []HybridRecallItem {
 	ranked := make([]RankedItem, len(fused))
-	byFact := make(map[string]*HybridRecallItem, len(fused))
 	for i := range fused {
 		ranked[i] = RankedItem{Text: fused[i].Fact, Score: fused[i].RRFScore}
-		byFact[fused[i].Fact] = &fused[i]
 	}
 
-	fitted, _, _ := s.budgetMgr.FitToBudget(ranked, alloc.VectorTokens)
+	survivors, _ := s.budgetSurvivors(ranked)
 
-	result := make([]HybridRecallItem, 0, len(fitted))
-	for _, r := range fitted {
-		if item, ok := byFact[r.Text]; ok {
-			result = append(result, *item)
+	result := make([]HybridRecallItem, 0, len(fused))
+	for i := range fused {
+		if survivors[fused[i].Fact] {
+			result = append(result, fused[i])
 		}
 	}
 	return result

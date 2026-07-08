@@ -197,3 +197,98 @@ func TestMemoryServiceRecallBudgetAndKCap(t *testing.T) {
 		t.Errorf("expected k=2 to cap results, got %d", len(capped))
 	}
 }
+
+// TestMemoryServiceRecallExplainNilSafe verifies that RecallExplain never
+// panics when budgetMgr and consolidationRepo are unset (nil), always
+// reports all 5 PipelineSizes keys, a zero Budget, and FitInBudget=true for
+// every item (spec: "Budget manager nil").
+func TestMemoryServiceRecallExplainNilSafe(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "018")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	svcCreateTestEntity(t, ctx, pool, universe.ID, "Entity A", 0.9, "active")
+
+	entityRepo := repositories.NewEntityRepo(pool)
+	graphRepo := repositories.NewGraphRepo(pool)
+	vectorRepo := repositories.NewVectorRepo(pool)
+
+	svc := NewMemoryService(graphRepo, entityRepo, vectorRepo)
+
+	explanation, err := svc.RecallExplain(ctx, universe.ID, nil, "", 10)
+	if err != nil {
+		t.Fatalf("RecallExplain failed on nil-safe input: %v", err)
+	}
+
+	wantKeys := []string{"vector", "graph", "recency", "keyword", "consolidated"}
+	for _, key := range wantKeys {
+		if _, ok := explanation.PipelineSizes[key]; !ok {
+			t.Errorf("expected PipelineSizes to have key %q, got %+v", key, explanation.PipelineSizes)
+		}
+	}
+	if explanation.Budget != (BudgetReport{}) {
+		t.Errorf("expected zero Budget when budgetMgr is nil, got %+v", explanation.Budget)
+	}
+	if len(explanation.Items) == 0 {
+		t.Fatal("expected non-empty items (recency-seeded degraded mode)")
+	}
+	for _, item := range explanation.Items {
+		if !item.FitInBudget {
+			t.Errorf("expected FitInBudget=true for all items when budgetMgr is nil, got %+v", item)
+		}
+	}
+}
+
+// TestMemoryServiceRecallExplainBudgetMarking verifies that when a budgetMgr
+// is wired, RecallExplain marks the correct PipelineSizes and FitInBudget
+// per item against the real budget report (spec: "Budget manager present").
+func TestMemoryServiceRecallExplainBudgetMarking(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "018")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("Entity Number %02d", i)
+		svcCreateTestEntity(t, ctx, pool, universe.ID, name, 0.5+float64(i)*0.01, "active")
+	}
+
+	entityRepo := repositories.NewEntityRepo(pool)
+	graphRepo := repositories.NewGraphRepo(pool)
+	vectorRepo := repositories.NewVectorRepo(pool)
+
+	svc := NewMemoryService(graphRepo, entityRepo, vectorRepo)
+	tinyBudget := NewContextBudgetManager(NewTokenizer(), 100, 0) // available=100, VectorTokens=40
+	svc.SetBudgetMgr(tinyBudget)
+
+	explanation, err := svc.RecallExplain(ctx, universe.ID, nil, "", 100)
+	if err != nil {
+		t.Fatalf("RecallExplain failed: %v", err)
+	}
+
+	if explanation.PipelineSizes["recency"] != 20 {
+		t.Errorf("expected PipelineSizes[recency]=20, got %+v", explanation.PipelineSizes)
+	}
+	if explanation.Budget.VectorTokens != 40 {
+		t.Errorf("expected Budget.VectorTokens=40, got %+v", explanation.Budget)
+	}
+
+	var fitCount, unfitCount int
+	for _, item := range explanation.Items {
+		if item.FitInBudget {
+			fitCount++
+		} else {
+			unfitCount++
+		}
+	}
+	if fitCount == 0 {
+		t.Error("expected at least one item to fit in budget")
+	}
+	if unfitCount == 0 {
+		t.Error("expected at least one item to exceed the tiny budget (FitInBudget=false)")
+	}
+}
