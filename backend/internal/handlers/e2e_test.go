@@ -22,8 +22,7 @@ import (
 
 // TestE2EFullFlow validates the end-to-end across Phase 2a endpoints.
 func TestE2EFullFlow(t *testing.T) {
-	pool, app := setupE2EApp(t)
-	defer pool.Close()
+	_, app := setupE2EApp(t)
 
 	// ── Register + Login ──
 	registerBody := `{"email":"e2e@test.com","password":"password123","display_name":"E2E User"}`
@@ -114,11 +113,11 @@ func TestE2EFullFlow(t *testing.T) {
 		t.Logf("%s: HTTP %d, body %d bytes", label, resp.StatusCode, len(body))
 	}
 
-	checkEndpoint("contradictions list", "GET", "/api/v1/contradictions?universe_id="+universeID, "")
-	checkEndpoint("contradiction resolve", "PUT", "/api/v1/contradictions/00000000-0000-4000-8000-0000000000e2/resolve", "")
-	checkEndpoint("timeline list", "GET", "/api/v1/timeline?universe_id="+universeID, "")
-	checkEndpoint("plot holes", "GET", "/api/v1/plot-holes?universe_id="+universeID, "")
-	checkEndpoint("graph", "GET", "/api/v1/graph?universe_id="+universeID, "")
+	checkEndpoint("contradictions list", "GET", "/api/v1/universes/"+universeID+"/contradictions", "")
+	checkEndpoint("contradiction resolve", "PUT", "/api/v1/universes/"+universeID+"/contradictions/00000000-0000-4000-8000-0000000000e2/resolve", "")
+	checkEndpoint("timeline list", "GET", "/api/v1/universes/"+universeID+"/timeline", "")
+	checkEndpoint("plot holes", "GET", "/api/v1/universes/"+universeID+"/plot-holes", "")
+	checkEndpoint("graph", "GET", "/api/v1/universes/"+universeID+"/graph", "")
 	checkEndpoint("neighbors", "GET", "/api/v1/entities/00000000-0000-4000-8000-000000000001/neighbors?universe_id="+universeID, "")
 	if os.Getenv("QWEN_API_KEY") != "" {
 		checkEndpoint("recall", "POST", "/api/v1/universes/"+universeID+"/recall", `{"query":"hero","k":5}`)
@@ -131,7 +130,7 @@ func setupE2EApp(t *testing.T) (*pgxpool.Pool, *fiber.App) {
 	t.Helper()
 
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "005")
+	testutil.RunMigrationsUpTo(t, pool, "019")
 
 	cfg := &config.Config{
 		DatabaseURL:                "postgres://localhost:5432/test",
@@ -203,12 +202,12 @@ func setupE2EApp(t *testing.T) (*pgxpool.Pool, *fiber.App) {
 	api.Use(middleware.AuthMiddleware(authSvc))
 	api.Post("/universes", universeH.Create)
 	api.Post("/universes/:universe_id/works", workH.Create)
-	api.Get("/contradictions", contradictionH.ListByUniverse)
-	api.Put("/contradictions/:id/resolve", contradictionH.Resolve)
-	api.Get("/timeline", timelineH.ListByUniverse)
-	api.Post("/timeline", timelineH.Create)
-	api.Get("/plot-holes", plotHoleH.ListByUniverse)
-	api.Get("/graph", graphH.FullGraph)
+	api.Get("/universes/:universe_id/contradictions", contradictionH.ListByUniverse)
+	api.Put("/universes/:universe_id/contradictions/:id/resolve", contradictionH.Resolve)
+	api.Get("/universes/:universe_id/timeline", timelineH.ListByUniverse)
+	api.Post("/universes/:universe_id/timeline", timelineH.Create)
+	api.Get("/universes/:universe_id/plot-holes", plotHoleH.ListByUniverse)
+	api.Get("/universes/:universe_id/graph", graphH.FullGraph)
 	api.Get("/entities/:id/neighbors", graphH.Neighbors)
 	api.Post("/universes/:id/recall", graphH.Recall)
 

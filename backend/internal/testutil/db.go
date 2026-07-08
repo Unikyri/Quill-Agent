@@ -88,29 +88,35 @@ func RunMigrationsUpTo(t *testing.T, pool *pgxpool.Pool, maxPrefix string) {
 	// Serialize the teardown+setup critical section across concurrent test
 	// packages sharing the same TEST_DATABASE_URL. Session-level advisory locks
 	// are bound to one physical connection, so a dedicated connection must be
-	// acquired (pool.Exec would grab an arbitrary pooled conn per call).
-	conn, err := pool.Acquire(ctx)
+	// used — a STANDALONE connection, not one checked out from the pool under
+	// test: holding a pooled conn for the test's whole lifetime means
+	// pool.Close() (called via t.Cleanup by SetupTestDB) blocks waiting for
+	// this conn to be released, deadlocking against our own t.Cleanup which
+	// only runs after the test's cleanups are processed in LIFO order — but
+	// worse, other pool users can starve while it's held. A standalone conn
+	// sidesteps the pool's lifecycle entirely.
+	conn, err := pgx.Connect(ctx, os.Getenv("TEST_DATABASE_URL"))
 	if err != nil {
-		t.Fatalf("acquire dedicated connection for migration lock: %v", err)
+		t.Fatalf("connect dedicated connection for migration lock: %v", err)
 	}
 
 	lockCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	if _, err := conn.Exec(lockCtx, `SELECT pg_advisory_lock(hashtext('quill_test_migrations'))`); err != nil {
-		conn.Release()
+		conn.Close(ctx)
 		t.Fatalf("acquire migration advisory lock: %v", err)
 	}
 
 	// Hold the lock (and its dedicated connection) for the WHOLE test, not just
 	// this teardown+setup critical section — released via t.Cleanup so it
 	// survives until the test body (which shares schema state with whatever
-	// ran here) has finished. Explicit unlock before Release is required:
-	// pgxpool reuses the physical connection, and a session-level lock
-	// persists across Release(), which would deadlock the next acquirer
-	// reusing this same connection.
+	// ran here) has finished. Explicit unlock before Close is required:
+	// a session-level lock is tied to the connection's backend session, so
+	// unlocking before closing keeps the lock release observable/ordered
+	// rather than relying on connection teardown to drop it implicitly.
 	t.Cleanup(func() {
 		_, _ = conn.Exec(ctx, `SELECT pg_advisory_unlock(hashtext('quill_test_migrations'))`)
-		conn.Release()
+		conn.Close(ctx)
 	})
 
 	// Reset state by tearing down all known migrations in reverse order.
