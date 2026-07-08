@@ -145,7 +145,7 @@ func main() {
 	contradictionH := handlers.NewContradictionHandler(contraSvc, contradictionRepo)
 	timelineH := handlers.NewTimelineHandler(timelineSvc, timelineRepo)
 	plotHoleH := handlers.NewPlotHoleHandler(plotHoleSvc).WithRepo(plotHoleRepo)
-	graphH := handlers.NewGraphHandler(graphRepo, memorySvc, entityRepo)
+	graphH := handlers.NewGraphHandler(graphRepo, memorySvc, entityRepo, qwenSvc)
 	ingestionH := handlers.NewIngestionHandler(ingestionSvc)
 
 	// ── Fiber App ──
@@ -209,6 +209,7 @@ func main() {
 	api.Get("/universes/:universe_id/graph", graphH.FullGraph)
 	api.Get("/entities/:id/neighbors", graphH.Neighbors)
 	api.Post("/universes/:id/recall", graphH.Recall)
+	api.Post("/universes/:id/recall/explain", graphH.RecallExplain)
 	api.Get("/universes/:id/memory-status", graphH.MemoryStatus)
 	api.Post("/universes/:id/ingest", ingestionH.Ingest)
 

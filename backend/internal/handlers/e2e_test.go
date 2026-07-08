@@ -180,7 +180,7 @@ func setupE2EApp(t *testing.T) (*pgxpool.Pool, *fiber.App) {
 	contradictionH := NewContradictionHandler(contraSvc, contradictionRepo)
 	timelineH := NewTimelineHandler(timelineSvc, timelineRepo)
 	plotHoleH := NewPlotHoleHandler(plotHoleSvc).WithRepo(plotHoleRepo)
-	graphH := NewGraphHandler(graphRepo, memorySvc, entityRepo)
+	graphH := NewGraphHandler(graphRepo, memorySvc, entityRepo, qwenSvc)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {

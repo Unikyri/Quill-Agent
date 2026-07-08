@@ -18,15 +18,27 @@ type graphQuerier interface {
 	NHopTraversal(ctx context.Context, graphName string, startNodeID string, hops int) ([]repositories.GraphNode, []repositories.GraphEdge, error)
 }
 
-// GraphHandler serves graph-related REST endpoints.
-type GraphHandler struct {
-	graphRepo   graphQuerier
-	memorySvc   *services.MemoryService
-	entityRepo  *repositories.EntityRepo
+// queryEmbedder is the subset of *services.QwenService used to embed a
+// recall-explain query string. Local interface (mirrors the graphQuerier
+// convention above) rather than importing ws.EmbeddingProvider, which would
+// be a wrong-direction handlers→ws dependency.
+type queryEmbedder interface {
+	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
 }
 
-// NewGraphHandler creates a graph handler.
-func NewGraphHandler(graphRepo *repositories.GraphRepo, memorySvc *services.MemoryService, entityRepo *repositories.EntityRepo) *GraphHandler {
+// GraphHandler serves graph-related REST endpoints.
+type GraphHandler struct {
+	graphRepo  graphQuerier
+	memorySvc  *services.MemoryService
+	entityRepo *repositories.EntityRepo
+	embedder   queryEmbedder
+}
+
+// NewGraphHandler creates a graph handler. embedder is nil-allowed: a nil
+// embedder puts RecallExplain in degraded mode (query not embedded), the
+// same nil-safe convention ws.Hub uses for its EmbeddingProvider — unlike
+// graphRepo/memorySvc/entityRepo, it does not panic on nil.
+func NewGraphHandler(graphRepo *repositories.GraphRepo, memorySvc *services.MemoryService, entityRepo *repositories.EntityRepo, embedder queryEmbedder) *GraphHandler {
 	if graphRepo == nil {
 		panic("graphRepo required")
 	}
@@ -36,7 +48,7 @@ func NewGraphHandler(graphRepo *repositories.GraphRepo, memorySvc *services.Memo
 	if entityRepo == nil {
 		panic("entityRepo required")
 	}
-	return &GraphHandler{graphRepo: graphRepo, memorySvc: memorySvc, entityRepo: entityRepo}
+	return &GraphHandler{graphRepo: graphRepo, memorySvc: memorySvc, entityRepo: entityRepo, embedder: embedder}
 }
 
 // FullGraph returns all nodes and edges for a universe's graph.
@@ -168,6 +180,60 @@ func (h *GraphHandler) Recall(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"items": items,
 	})
+}
+
+// RecallExplain returns the same fused recall results as Recall, but with a
+// full per-pipeline RRF contribution ledger per item — unlike Recall, it
+// embeds req.Query via the injected embedder before calling into the memory
+// service, so the query is never silently ignored.
+// POST /api/v1/universes/:id/recall/explain
+// Body: {"query": "text", "k": 5}
+func (h *GraphHandler) RecallExplain(c *fiber.Ctx) error {
+	universeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
+		})
+	}
+
+	var req struct {
+		Query string `json:"query"`
+		K     int    `json:"k"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid request body"},
+		})
+	}
+
+	if req.K <= 0 {
+		req.K = 10
+	}
+	if req.K > 20 {
+		req.K = 20
+	}
+
+	// Embed the query string before passing to RecallExplain (mirror
+	// ws/hub.go's handleRecallRequest embedding step) — degraded mode only
+	// when there's no embedder or an empty query, never silently on error.
+	var embedding []float32
+	if h.embedder != nil && req.Query != "" {
+		embedding, err = h.embedder.GenerateEmbedding(c.Context(), req.Query)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "failed to embed query"},
+			})
+		}
+	}
+
+	explanation, err := h.memorySvc.RecallExplain(c.Context(), universeID, embedding, req.Query, req.K)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(explanation)
 }
 
 // MemoryStatus returns per-entity relevance history and derived lifecycle
