@@ -109,4 +109,62 @@ describe('api', () => {
       expect(result.items).toEqual(items)
     })
   })
+
+  describe('recallExplain', () => {
+    it('calls POST /universes/:id/recall/explain with query and k in body, returns typed shape', async () => {
+      const responseBody = {
+        query: 'wizard origin',
+        pipeline_sizes: { vector: 1, graph: 0, recency: 2, keyword: 0, consolidated: 0 },
+        items: [
+          {
+            id: 'r1',
+            entity_id: 'e1',
+            fact: 'Alice is a wizard',
+            rrf_score: 0.0164,
+            contributions: [{ pipeline: 'vector', rank: 1, delta: 0.0164 }],
+            fit_in_budget: true,
+          },
+        ],
+        budget: {
+          max_context_tokens: 8000,
+          available: 4000,
+          entities_tokens: 1000,
+          vector_tokens: 2000,
+          tools_tokens: 1000,
+          used_percent: 50,
+        },
+      }
+      mockFetchResponse(responseBody)
+
+      const result = await api.recallExplain('uni-1', 'wizard origin', 5)
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${API_BASE}/universes/uni-1/recall/explain`)
+      expect(init.method).toBe('POST')
+      expect(JSON.parse(init.body)).toEqual({ query: 'wizard origin', k: 5 })
+      expect(result).toEqual(responseBody)
+    })
+
+    it('defaults k to 10 when omitted', async () => {
+      mockFetchResponse({
+        query: 'q',
+        pipeline_sizes: {},
+        items: [],
+        budget: {
+          max_context_tokens: 0,
+          available: 0,
+          entities_tokens: 0,
+          vector_tokens: 0,
+          tools_tokens: 0,
+          used_percent: 0,
+        },
+      })
+
+      await api.recallExplain('uni-1', 'q')
+
+      const [, init] = fetchMock.mock.calls[0]
+      expect(JSON.parse(init.body)).toEqual({ query: 'q', k: 10 })
+    })
+  })
 })

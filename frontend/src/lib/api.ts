@@ -151,6 +151,28 @@ export const api = {
       { method: 'POST', json: { query, k } }
     ),
 
+  recallExplain: (universeId: string, query: string, k = 10) =>
+    request<{
+      query: string
+      pipeline_sizes: Record<string, number>
+      items: Array<{
+        id: string
+        entity_id: string
+        fact: string
+        rrf_score: number
+        contributions: Array<{ pipeline: string; rank: number; delta: number }>
+        fit_in_budget: boolean
+      }>
+      budget: {
+        max_context_tokens: number
+        available: number
+        entities_tokens: number
+        vector_tokens: number
+        tools_tokens: number
+        used_percent: number
+      }
+    }>(`/universes/${universeId}/recall/explain`, { method: 'POST', json: { query, k } }),
+
   getMemoryStatus: (universeId: string) =>
     request<{
       consolidated_count: number
