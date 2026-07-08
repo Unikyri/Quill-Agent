@@ -10,3 +10,27 @@ Generated: 2026-07-08T03:56:46Z
 | Who is Lyra Vane's mentor? | 1.000 | 0.200 | 0.250 | 0.431 |
 | Where does Maven Voss operate from? | 0.000 | 0.000 | 0.125 | 0.000 |
 | What is the Convergence dependent on? | 0.000 | 0.000 | 0.111 | 0.000 |
+
+## Latency Benchmark
+
+Degraded-mode `RecallWithQuery` latency (nil embedding, k=5).
+
+| Entities | p50 (ms) | p95 (ms) |
+|----------|----------|----------|
+| 50 | 2.000 | 3.000 |
+| 200 | 2.000 | 3.000 |
+| 1000 | 5.000 | 7.000 |
+| 5000 | 22.000 | 27.000 |
+
+## Forgetting Timeline
+
+After 17 decay ticks (lambda=0.10, threshold=0.15).
+
+| Metric | Value |
+|--------|-------|
+| Total active entities | 15 |
+| Archived entities | 6 |
+| Should be archived (gold) | 2 |
+| Must stay active (gold) | 3 |
+| False negatives (should archive, stayed active) | 0 |
+| False positives (should stay active, archived) | 0 |
