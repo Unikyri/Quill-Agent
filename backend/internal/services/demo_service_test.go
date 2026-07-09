@@ -442,3 +442,81 @@ func readMigrationFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	return string(data), err
 }
+
+// TestCloneGraphSkipsUnmappedEdges verifies that cloneGraph skips (rather
+// than attempting to create) an edge whose source or target entity is
+// missing from entityMap — simulating template/entity-table drift — and
+// reports how many edges were skipped instead of silently no-op-ing.
+func TestCloneGraphSkipsUnmappedEdges(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "018")
+	if !testutil.CheckAGE(t, pool) {
+		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
+	}
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	template := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	templateID := template.ID.String()
+
+	graphRepo := repositories.NewGraphRepo(pool)
+	if err := graphRepo.CreateGraph(ctx, templateID); err != nil {
+		t.Fatalf("create template graph: %v", err)
+	}
+	graphName := "universe_" + templateID
+	e1 := uuid.NewString()
+	e2 := uuid.NewString()
+	if err := graphRepo.CreateNode(ctx, graphName, "Character", map[string]interface{}{
+		"entity_id": e1, "name": "A", "status": "active", "relevance_score": 0.5,
+	}); err != nil {
+		t.Fatalf("create node e1: %v", err)
+	}
+	if err := graphRepo.CreateNode(ctx, graphName, "Character", map[string]interface{}{
+		"entity_id": e2, "name": "B", "status": "active", "relevance_score": 0.5,
+	}); err != nil {
+		t.Fatalf("create node e2: %v", err)
+	}
+	if err := graphRepo.CreateEdge(ctx, graphName, e1, e2, "KNOWS", nil); err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+
+	svc := NewDemoService(pool, repositories.NewUniverseRepo(pool), graphRepo)
+
+	t.Run("empty entityMap skips both endpoints, counted once", func(t *testing.T) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		defer tx.Rollback(ctx)
+
+		newID := uuid.NewString()
+		skipped, err := svc.cloneGraph(ctx, tx, templateID, newID, map[string]string{})
+		if err != nil {
+			t.Fatalf("cloneGraph: %v", err)
+		}
+		if skipped != 1 {
+			t.Errorf("expected skipped=1 for unmapped edge, got %d", skipped)
+		}
+	})
+
+	t.Run("fully-mapped entityMap creates the edge, skip count zero", func(t *testing.T) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		defer tx.Rollback(ctx)
+
+		newID := uuid.NewString()
+		newE1 := uuid.NewString()
+		newE2 := uuid.NewString()
+		entityMap := map[string]string{e1: newE1, e2: newE2}
+
+		skipped, err := svc.cloneGraph(ctx, tx, templateID, newID, entityMap)
+		if err != nil {
+			t.Fatalf("cloneGraph: %v", err)
+		}
+		if skipped != 0 {
+			t.Errorf("expected skipped=0 for fully-mapped edge, got %d", skipped)
+		}
+	})
+}

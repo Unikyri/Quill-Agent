@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -478,8 +479,12 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 	}
 
 	// 10. AGE Graph clone
-	if err := s.cloneGraph(ctx, tx, templateID, newID, entityMap); err != nil {
+	skipped, err := s.cloneGraph(ctx, tx, templateID, newID, entityMap)
+	if err != nil {
 		return "", fmt.Errorf("clone graph: %w", err)
+	}
+	if skipped > 0 {
+		log.Printf("[demo] cloneGraph skipped %d unmapped edges (template drift)", skipped)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -529,10 +534,10 @@ func remapUUIDs(ids []string, m map[string]string) []string {
 
 // cloneGraph copies all vertices and edges from the template universe's AGE graph
 // into a new graph for the cloned universe, remapping entity_ids.
-func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, newID string, entityMap map[string]string) error {
+func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, newID string, entityMap map[string]string) (int, error) {
 	// 1. Create the new graph
 	if err := s.graphRepo.CreateGraphTx(ctx, tx, newID); err != nil {
-		return fmt.Errorf("create graph: %w", err)
+		return 0, fmt.Errorf("create graph: %w", err)
 	}
 	newGraphName := "universe_" + newID
 
@@ -541,7 +546,7 @@ func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, new
 		SELECT id, type, name, status, relevance_score
 		FROM entities WHERE universe_id = $1`, templateID)
 	if err != nil {
-		return fmt.Errorf("query entities for graph nodes: %w", err)
+		return 0, fmt.Errorf("query entities for graph nodes: %w", err)
 	}
 	var graphNodes []struct {
 		oldID, etype, name, status string
@@ -554,13 +559,13 @@ func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, new
 		}
 		if err := entRows.Scan(&item.oldID, &item.etype, &item.name, &item.status, &item.relevance); err != nil {
 			entRows.Close()
-			return fmt.Errorf("scan entity for node: %w", err)
+			return 0, fmt.Errorf("scan entity for node: %w", err)
 		}
 		graphNodes = append(graphNodes, item)
 	}
 	entRows.Close()
 	if err := entRows.Err(); err != nil {
-		return fmt.Errorf("iterate entities for graph nodes: %w", err)
+		return 0, fmt.Errorf("iterate entities for graph nodes: %w", err)
 	}
 	for _, item := range graphNodes {
 		newEntityID := entityMap[item.oldID]
@@ -572,7 +577,7 @@ func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, new
 		}
 		// ponytail: use entity type as graph node label directly
 		if err := s.graphRepo.CreateNodeTx(ctx, tx, newGraphName, item.etype, props); err != nil {
-			return fmt.Errorf("create node %s: %w", newEntityID, err)
+			return 0, fmt.Errorf("create node %s: %w", newEntityID, err)
 		}
 	}
 
@@ -580,15 +585,20 @@ func (s *DemoService) cloneGraph(ctx context.Context, tx pgx.Tx, templateID, new
 	templateGraphName := "universe_" + templateID
 	tmplEdges, err := s.graphRepo.QueryTemplateEdgesTx(ctx, tx, templateGraphName)
 	if err != nil {
-		return fmt.Errorf("query graph edges: %w", err)
+		return 0, fmt.Errorf("query graph edges: %w", err)
 	}
+	skipped := 0
 	for _, item := range tmplEdges {
 		newSrcID := entityMap[item.Source]
 		newTgtID := entityMap[item.Target]
+		if newSrcID == "" || newTgtID == "" {
+			skipped++
+			continue
+		}
 		if err := s.graphRepo.CreateEdgeTx(ctx, tx, newGraphName, newSrcID, newTgtID, item.RelType, nil); err != nil {
-			return fmt.Errorf("create edge %s-[%s]->%s: %w", newSrcID, item.RelType, newTgtID, err)
+			return 0, fmt.Errorf("create edge %s-[%s]->%s: %w", newSrcID, item.RelType, newTgtID, err)
 		}
 	}
 
-	return nil
+	return skipped, nil
 }
