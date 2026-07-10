@@ -130,6 +130,7 @@ func main() {
 
 	// Ingestion service (async document upload pipeline)
 	ingestionSvc := services.NewIngestionService(pool, entitySvc, vectorRepo, graphRepo, qwenSvc, hub)
+	ingestionSvc.SetPostIngestAnalysis(contraSvc, plotHoleSvc, budgetMgr, cfg.IngestAnalysisMaxChapters)
 
 	// ── Handlers ──
 

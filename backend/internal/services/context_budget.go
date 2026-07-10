@@ -1,6 +1,9 @@
 package services
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // RankedItem is a piece of context text with a relevance score used to
 // prioritize inclusion under a token budget.
@@ -112,4 +115,56 @@ func (b *ContextBudgetManager) FitToBudget(items []RankedItem, budget int) (fitt
 		tokensUsed += itemTokens
 	}
 	return fitted, dropped, tokensUsed
+}
+
+// TruncateToTokens greedily accumulates text paragraph-by-paragraph
+// (splitting on "\n\n") from the start until adding the next paragraph would
+// exceed budget, preserving prose order (unlike FitToBudget, which sorts by
+// score and would scramble a chapter's narrative flow).
+//
+// Pinned edge case: if the very first paragraph alone exceeds budget, it is
+// still returned — truncated at the token level (not dropped to empty) —
+// since giving the caller partial prose to analyze beats giving it nothing.
+func (b *ContextBudgetManager) TruncateToTokens(text string, budget int) string {
+	if budget <= 0 || text == "" {
+		return ""
+	}
+
+	paragraphs := strings.Split(text, "\n\n")
+	var buf strings.Builder
+	used := 0
+	for _, p := range paragraphs {
+		pTokens := b.tok.CountTokens(p)
+		if used == 0 && buf.Len() == 0 && pTokens > budget {
+			return truncateParagraphToTokens(b.tok, p, budget)
+		}
+		if used+pTokens > budget {
+			break
+		}
+		if buf.Len() > 0 {
+			buf.WriteString("\n\n")
+		}
+		buf.WriteString(p)
+		used += pTokens
+	}
+	return buf.String()
+}
+
+// truncateParagraphToTokens binary-searches the longest rune-safe prefix of
+// text whose token count fits within budget.
+//
+// ponytail: O(log n) tokenizer calls — fine at chapter-text sizes; only
+// reached for a single oversized paragraph, not the common path.
+func truncateParagraphToTokens(tok *Tokenizer, text string, budget int) string {
+	runes := []rune(text)
+	lo, hi := 0, len(runes)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if tok.CountTokens(string(runes[:mid])) <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return string(runes[:lo])
 }
