@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -48,6 +50,13 @@ type IngestionService struct {
 	graphRepo  *repositories.GraphRepo
 	qwenSvc    IngestionQwen
 	hub        AnalysisHub
+
+	// Post-ingest bounded analysis (D4) — all nil-safe, wired via
+	// SetPostIngestAnalysis. Unset means analysis is silently skipped.
+	contraSvc           *ContradictionService
+	plotHoleSvc         *PlotHoleService
+	analysisBudgetMgr   *ContextBudgetManager
+	analysisMaxChapters int
 }
 
 // NewIngestionService creates an IngestionService. All parameters may be nil
@@ -70,12 +79,26 @@ func NewIngestionService(
 	}
 }
 
+// supportedFileTypes are the extensions parseDocument can handle. Checked
+// synchronously in Start (before any I/O) so unsupported uploads (legacy
+// .doc, unknown formats) get an immediate 400 instead of a garbage job row.
+var supportedFileTypes = map[string]bool{"md": true, "txt": true, "docx": true, "pdf": true}
+
+// ErrUnsupportedFileType is returned by Start when filename's extension isn't
+// one of supportedFileTypes.
+var ErrUnsupportedFileType = errors.New("unsupported file type — only .md, .txt, .docx, and .pdf are supported (legacy .doc? Save as .docx)")
+
 // Start creates an ingestion job and kicks off the async pipeline.
 // Returns the job ID immediately; duplicate is true when the same content
 // was already ingested into this universe (the existing job's ID is
 // returned and no worker is started). The caller should return 202 Accepted
 // for new jobs and 200 for duplicates.
 func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, reader io.Reader, filename string) (uuid.UUID, bool, error) {
+	fileType := fileTypeOf(filename)
+	if !supportedFileTypes[fileType] {
+		return uuid.Nil, false, ErrUnsupportedFileType
+	}
+
 	jobID := uuid.New()
 
 	// ponytail: read the full content synchronously before spawning the
@@ -119,10 +142,16 @@ func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, read
 				_ = tx.Rollback(ctx)
 				return uuid.Nil, false, fmt.Errorf("get max order index: %w", err)
 			}
+			// Work title = filename stem. The work row is created here in
+			// Start, before the document is parsed in runWorker, so a
+			// heading-derived title (the proposal's original idea) isn't
+			// available yet — and the first heading is usually just
+			// "Chapter 1" anyway, not a useful book title.
+			title := strings.TrimSuffix(filename, filepath.Ext(filename))
 			work := models.Work{
 				ID:         uuid.New(),
 				UniverseID: universeID,
-				Title:      "Imported Manuscript",
+				Title:      title,
 				Type:       "novel",
 				Status:     "in_progress",
 				OrderIndex: orderIdx + 1,
@@ -137,7 +166,7 @@ func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, read
 			workID = work.ID
 		}
 
-		if err := repo.Create(ctx, jobID, universeID, workID, "pending", filename, hash); err != nil {
+		if err := repo.Create(ctx, jobID, universeID, workID, "pending", filename, fileType, hash); err != nil {
 			// Unique violation: another upload of the same content won the
 			// race between our FindByContentHash and this insert.
 			var pgErr *pgconn.PgError
@@ -163,6 +192,15 @@ func (s *IngestionService) ListJobs(ctx context.Context, universeID uuid.UUID) (
 	return repositories.NewIngestionRepo(s.pool).ListByUniverse(ctx, universeID)
 }
 
+// ingestedChapter tracks a persisted chapter and the entities resolved from
+// it, collected during runWorker's chunk loop for the post-ingest analysis
+// pass (SetPostIngestAnalysis).
+type ingestedChapter struct {
+	ID       uuid.UUID
+	Content  string
+	Entities []ResolvedEntity
+}
+
 // runWorker processes the document in a background goroutine.
 //
 // ponytail: synchronous per-chunk — no parallel chunk extraction to avoid
@@ -185,8 +223,30 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 		}
 	}
 
-	// Split content by markdown headers
-	chunks := s.splitChunks(string(content))
+	// Parse the raw upload into plain text. Raw binary must never reach
+	// splitChunks/chapters.content — a parse failure or empty/whitespace-only
+	// extraction fails the job cleanly instead.
+	text, err := parseDocument(filename, content)
+	if err != nil || strings.TrimSpace(text) == "" {
+		msg := "document contains no text"
+		if err != nil {
+			msg = err.Error()
+		}
+		s.updateJobStatus(ctx, jobID, "failed", msg)
+		s.emitProgress(jobID, ownerID, "failed", 0, 0)
+		// The failed job row (with its error_message) is the durable record of
+		// this attempt — it must survive so a reload shows "upload failed: …"
+		// instead of nothing. We deliberately do NOT delete the Work here:
+		// ingestion_jobs.work_id is `NOT NULL REFERENCES works(id) ON DELETE
+		// CASCADE` (migration 012), so deleting the Work would cascade-delete
+		// this job row and its error_message. The Work has a meaningful title
+		// (the filename stem) and is user-removable via the delete-work button.
+		return
+	}
+
+	// Split parsed text into chapters (markdown/EN/ES/roman/ALL-CAPS heading
+	// cascade, falling back to paragraph-boundary chunks).
+	chunks := s.splitChunks(text)
 	if len(chunks) == 0 {
 		s.updateJobStatus(ctx, jobID, "completed", "")
 		return
@@ -211,6 +271,7 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 
 	anySucceeded := false
 	var lastErr error
+	var ingestedChapters []ingestedChapter
 
 	for i, ch := range chunks {
 		select {
@@ -299,7 +360,19 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 				continue
 			}
 			anySucceeded = true
-			entitiesTotal += s.resolveAndBuildGraph(ctx, universeID, extracted)
+			mentionText := ch.content
+			if len(mentionText) > 120 {
+				mentionText = mentionText[:120]
+			}
+			count, resolved := s.resolveAndBuildGraph(ctx, universeID, extracted, mentionText)
+			entitiesTotal += count
+			if chapterID != uuid.Nil {
+				ingestedChapters = append(ingestedChapters, ingestedChapter{
+					ID:       chapterID,
+					Content:  ch.content,
+					Entities: resolved,
+				})
+			}
 		}
 
 		s.updateProgress(ctx, jobID, len(chunks), i+1, entitiesTotal)
@@ -312,6 +385,13 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 		s.emitProgress(jobID, ownerID, "failed", len(chunks), len(chunks))
 		return
 	}
+
+	// Bounded post-ingest analysis (contradiction + plot-hole checks) runs
+	// before the job is marked completed, so the job honestly reports
+	// "running" until analysis ends. Best-effort/enrichment: never flips a
+	// completed job to failed. No-ops when SetPostIngestAnalysis wasn't
+	// called (nil deps).
+	s.runPostIngestAnalysis(ctx, universeID, ingestedChapters, ownerID)
 
 	s.updateJobStatus(ctx, jobID, "completed", "")
 	s.updateProgress(ctx, jobID, len(chunks), len(chunks), entitiesTotal)
@@ -332,37 +412,133 @@ func (s *IngestionService) createChapter(ctx context.Context, chRepo *repositori
 	return tx.Commit(ctx)
 }
 
-// splitChunks splits document content by markdown headers (# Chapter N).
+// maxSaneHeadingMatches guards against a heading pattern matching almost
+// every line (a false positive, e.g. a doc that happens to contain many bare
+// roman-numeral-looking lines) — treated the same as "no match", falling
+// through to the next pattern in the cascade.
+const maxSaneHeadingMatches = 500
+
+// headingMatch is a single detected chapter heading: title is the extracted
+// heading text, start/end are the byte offsets of the whole matched heading
+// line in the source content (used to slice out chapter bodies).
+type headingMatch struct {
+	start, end int
+	title      string
+}
+
+// headingPatterns is the priority cascade of heading patterns tried in
+// splitChunks, in order — the first pattern class with >= 2 matches (and
+// <= maxSaneHeadingMatches) wins. Each has exactly one capture group holding
+// the extracted title text.
+var headingPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)^#{1,3} (.+)$`),                                    // markdown (also styled DOCX via D1 bonus)
+	regexp.MustCompile(`(?mi)^[ \t]*(chapter[ \t]+(?:\d+|[ivxlc]+)\b.*)$`),     // English
+	regexp.MustCompile(`(?mi)^[ \t]*(cap[ií]tulo[ \t]+(?:\d+|[ivxlc]+)\b.*)$`), // Spanish
+	regexp.MustCompile(`(?m)^[ \t]*([IVXLC]{1,7}\.?)[ \t]*$`),                  // bare roman numeral
+}
+
+// regexHeadingMatches runs re against content and returns one headingMatch
+// per match, using the first capture group as the title.
+func regexHeadingMatches(content string, re *regexp.Regexp) []headingMatch {
+	locs := re.FindAllStringSubmatchIndex(content, -1)
+	matches := make([]headingMatch, 0, len(locs))
+	for _, loc := range locs {
+		matches = append(matches, headingMatch{
+			start: loc[0],
+			end:   loc[1],
+			title: strings.TrimSpace(content[loc[2]:loc[3]]),
+		})
+	}
+	return matches
+}
+
+// isAllCapsHeadingLine reports whether a trimmed line looks like an
+// ALL-CAPS chapter heading: short (<= 60 chars), no lowercase letters, and
+// at least 3 letters (so pure punctuation/numeral lines don't qualify).
+func isAllCapsHeadingLine(line string) bool {
+	if line == "" || len(line) > 60 {
+		return false
+	}
+	letters := 0
+	for _, r := range line {
+		if unicode.IsLower(r) {
+			return false
+		}
+		if unicode.IsUpper(r) {
+			letters++
+		}
+	}
+	return letters >= 3
+}
+
+// allCapsHeadingMatches scans content line-by-line for ALL-CAPS heading
+// candidates — this shape (short lines, no lowercase) isn't expressible as a
+// single regex the way the other patterns are.
+func allCapsHeadingMatches(content string) []headingMatch {
+	var matches []headingMatch
+	offset := 0
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if isAllCapsHeadingLine(trimmed) {
+			leading := len(line) - len(strings.TrimLeft(line, " \t"))
+			start := offset + leading
+			matches = append(matches, headingMatch{start: start, end: start + len(trimmed), title: trimmed})
+		}
+		offset += len(line) + 1 // +1 for the '\n' consumed by Split
+	}
+	return matches
+}
+
+// splitByHeadings turns a set of detected heading matches into chapter
+// chunks: the body of each chunk runs from just after its heading line to
+// just before the next heading (or end of content).
+func splitByHeadings(content string, matches []headingMatch) []ingestionChunk {
+	chunks := make([]ingestionChunk, 0, len(matches))
+	for i, m := range matches {
+		bodyStart := m.end + 1 // after the newline
+		var bodyEnd int
+		if i+1 < len(matches) {
+			bodyEnd = matches[i+1].start
+		} else {
+			bodyEnd = len(content)
+		}
+		if bodyStart > len(content) {
+			bodyStart = len(content)
+		}
+		if bodyEnd > bodyStart {
+			body := strings.TrimSpace(content[bodyStart:bodyEnd])
+			if body != "" {
+				chunks = append(chunks, ingestionChunk{title: m.title, content: body})
+			}
+		}
+	}
+	return chunks
+}
+
+// splitChunks splits document content into chapters. It tries a priority
+// cascade of heading patterns (markdown, English "Chapter N", Spanish
+// "Capítulo N", bare roman numerals, then short ALL-CAPS lines) — the first
+// pattern class with >= 2 matches wins. No pattern matching falls back to
+// splitByParagraphs.
 //
-// ponytail: simple regex split — no AST parser needed for markdown chapters.
+// ponytail: simple regex cascade — no AST parser needed for chapter detection.
 func (s *IngestionService) splitChunks(content string) []ingestionChunk {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
 
-	headerRe := regexp.MustCompile(`(?m)^# (.+)$`)
-	locs := headerRe.FindAllStringSubmatchIndex(content, -1)
-
-	if len(locs) == 0 {
-		return splitByParagraphs(content)
-	}
-
-	chunks := make([]ingestionChunk, 0, len(locs))
-	for i, loc := range locs {
-		title := content[loc[2]:loc[3]]
-		bodyStart := loc[1] + 1 // after the newline
-		var bodyEnd int
-		if i+1 < len(locs) {
-			bodyEnd = locs[i+1][0]
-		} else {
-			bodyEnd = len(content)
-		}
-		body := strings.TrimSpace(content[bodyStart:bodyEnd])
-		if body != "" {
-			chunks = append(chunks, ingestionChunk{title: title, content: body})
+	for _, re := range headingPatterns {
+		matches := regexHeadingMatches(content, re)
+		if len(matches) >= 2 && len(matches) <= maxSaneHeadingMatches {
+			return splitByHeadings(content, matches)
 		}
 	}
-	return chunks
+
+	if matches := allCapsHeadingMatches(content); len(matches) >= 2 && len(matches) <= maxSaneHeadingMatches {
+		return splitByHeadings(content, matches)
+	}
+
+	return splitByParagraphs(content)
 }
 
 // splitByParagraphs splits content at paragraph boundaries when there are no
@@ -412,12 +588,13 @@ func splitByParagraphs(content string) []ingestionChunk {
 }
 
 // resolveAndBuildGraph resolves or creates entities and builds graph nodes,
-// returning the number of entities successfully resolved.
+// returning the number of entities successfully resolved and the resolved
+// entities themselves (needed by the post-ingest analysis pass, D4).
 //
 // ponytail: reuses EntityService.ResolveOrCreate — same dedup/merge logic.
-func (s *IngestionService) resolveAndBuildGraph(ctx context.Context, universeID uuid.UUID, extracted *ExtractedEntities) int {
+func (s *IngestionService) resolveAndBuildGraph(ctx context.Context, universeID uuid.UUID, extracted *ExtractedEntities, mentionText string) (int, []ResolvedEntity) {
 	if extracted == nil {
-		return 0
+		return 0, nil
 	}
 
 	allEntities := make([]repositories.ExtractedEntity, 0)
@@ -458,15 +635,21 @@ func (s *IngestionService) resolveAndBuildGraph(ctx context.Context, universeID 
 		})
 	}
 
-	resolved := 0
+	var resolved []ResolvedEntity
 	for _, ee := range allEntities {
-		if _, _, _, err := s.entitySvc.ResolveOrCreate(ctx, universeID, ee); err != nil {
+		entity, previousStatus, isNew, err := s.entitySvc.ResolveOrCreate(ctx, universeID, ee)
+		if err != nil {
 			log.Printf("[ingestion] resolve entity %s: %v", ee.Name, err)
 			continue
 		}
-		resolved++
+		resolved = append(resolved, ResolvedEntity{
+			Entity:         *entity,
+			MentionText:    mentionText,
+			IsNew:          isNew,
+			PreviousStatus: previousStatus,
+		})
 	}
-	return resolved
+	return len(resolved), resolved
 }
 
 // emitProgress sends an ingestion_progress WebSocket event to the resolved
