@@ -23,14 +23,108 @@ func NewIngestionRepo(pool *pgxpool.Pool) *IngestionRepo {
 }
 
 // Create inserts a new ingestion job with the given initial status.
-func (r *IngestionRepo) Create(ctx context.Context, jobID, universeID, workID uuid.UUID, status, filename string) error {
+// contentHash may be empty (stored as NULL, exempt from the dedup index).
+func (r *IngestionRepo) Create(ctx context.Context, jobID, universeID, workID uuid.UUID, status, filename, contentHash string) error {
 	query := `
-		INSERT INTO ingestion_jobs (id, universe_id, work_id, filename, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
+		INSERT INTO ingestion_jobs (id, universe_id, work_id, filename, status, content_hash, created_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NOW())
 	`
-	_, err := r.pool.Exec(ctx, query, jobID, universeID, workID, filename, status)
+	_, err := r.pool.Exec(ctx, query, jobID, universeID, workID, filename, status, contentHash)
 	if err != nil {
 		return fmt.Errorf("create ingestion job: %w", err)
+	}
+	return nil
+}
+
+// FindByContentHash returns the most recent non-failed job for the given
+// universe and content hash, or (nil, nil) when no such job exists.
+func (r *IngestionRepo) FindByContentHash(ctx context.Context, universeID uuid.UUID, hash string) (*models.IngestionJob, error) {
+	query := `
+		SELECT id, universe_id, work_id, filename, COALESCE(file_type, ''),
+		       status, total_chapters_detected, chapters_processed,
+		       entities_extracted, COALESCE(error_message, ''), started_at, completed_at, created_at
+		FROM ingestion_jobs
+		WHERE universe_id = $1 AND content_hash = $2 AND status <> 'failed'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	job := &models.IngestionJob{}
+	err := r.pool.QueryRow(ctx, query, universeID, hash).Scan(
+		&job.ID,
+		&job.UniverseID,
+		&job.WorkID,
+		&job.Filename,
+		&job.FileType,
+		&job.Status,
+		&job.TotalChaptersDetected,
+		&job.ChaptersProcessed,
+		&job.EntitiesExtracted,
+		&job.ErrorMessage,
+		&job.StartedAt,
+		&job.CompletedAt,
+		&job.CreatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find ingestion job by hash: %w", err)
+	}
+	return job, nil
+}
+
+// ListByUniverse returns the 50 most recent ingestion jobs for a universe.
+func (r *IngestionRepo) ListByUniverse(ctx context.Context, universeID uuid.UUID) ([]models.IngestionJob, error) {
+	query := `
+		SELECT id, universe_id, work_id, filename, COALESCE(file_type, ''),
+		       status, total_chapters_detected, chapters_processed,
+		       entities_extracted, COALESCE(error_message, ''), started_at, completed_at, created_at
+		FROM ingestion_jobs
+		WHERE universe_id = $1
+		ORDER BY created_at DESC
+		LIMIT 50
+	`
+	rows, err := r.pool.Query(ctx, query, universeID)
+	if err != nil {
+		return nil, fmt.Errorf("list ingestion jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := []models.IngestionJob{}
+	for rows.Next() {
+		var job models.IngestionJob
+		if err := rows.Scan(
+			&job.ID,
+			&job.UniverseID,
+			&job.WorkID,
+			&job.Filename,
+			&job.FileType,
+			&job.Status,
+			&job.TotalChaptersDetected,
+			&job.ChaptersProcessed,
+			&job.EntitiesExtracted,
+			&job.ErrorMessage,
+			&job.StartedAt,
+			&job.CompletedAt,
+			&job.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan ingestion job: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
+}
+
+// UpdateProgress persists the chapter/entity counters for a job.
+func (r *IngestionRepo) UpdateProgress(ctx context.Context, jobID uuid.UUID, totalDetected, processed, entities int) error {
+	query := `
+		UPDATE ingestion_jobs
+		SET total_chapters_detected = $2, chapters_processed = $3, entities_extracted = $4
+		WHERE id = $1
+	`
+	_, err := r.pool.Exec(ctx, query, jobID, totalDetected, processed, entities)
+	if err != nil {
+		return fmt.Errorf("update ingestion job progress: %w", err)
 	}
 	return nil
 }

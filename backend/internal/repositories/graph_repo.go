@@ -389,14 +389,20 @@ func (r *GraphRepo) NHopTraversal(ctx context.Context, graphName, startEntityID 
 	return nodes, edges, err
 }
 
-// DropGraph deletes all nodes and edges in a graph.
+// DropGraph drops the graph entirely (nodes, edges, and its label tables in
+// ag_catalog) via ag_catalog.drop_graph with cascade. A graph that doesn't
+// exist is not an error. Graph names are UUID-derived ("universe_<uuid>"),
+// injection-safe by construction like the rest of this repo.
 func (r *GraphRepo) DropGraph(ctx context.Context, graphName string) error {
-	return r.withAgeConn(ctx, func(c *pgx.Conn) error {
-		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (n) DETACH DELETE n $$) AS (a agtype)`,
-			quoteGraph(graphName))
+	err := r.withAgeConn(ctx, func(c *pgx.Conn) error {
+		query := fmt.Sprintf(`SELECT ag_catalog.drop_graph(%s, true)`, quoteGraph(graphName))
 		_, err := c.Exec(ctx, query)
 		return err
 	})
+	if err != nil && strings.Contains(err.Error(), "does not exist") {
+		return nil
+	}
+	return err
 }
 
 // collectGraphRows extracts nodes and edges from AGE cypher result rows.

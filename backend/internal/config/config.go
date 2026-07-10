@@ -29,6 +29,7 @@ type Config struct {
 	QwenMaxConcurrency   int
 	QwenTurboConcurrency int
 	QwenHealthTimeout    time.Duration
+	QwenAPITimeout       time.Duration
 	DecayLambda              float64
 	ArchiveThreshold         float64
 	RelevanceDeltaEpsilon    float64
@@ -37,6 +38,8 @@ type Config struct {
 	WSEnabled                bool
 	MaxContextTokens         int
 	ResponseReserve          int
+	ContradictionAgentDepth  int
+	PlotHoleAgentDepth       int
 }
 
 func Load() (*Config, error) {
@@ -62,6 +65,7 @@ func Load() (*Config, error) {
 		QwenMaxConcurrency:   getEnvInt("QWEN_MAX_CONCURRENCY", 3),
 		QwenTurboConcurrency: getEnvInt("QWEN_TURBO_CONCURRENCY", 5),
 		QwenHealthTimeout:         time.Duration(getEnvInt("QWEN_HEALTH_TIMEOUT_SECONDS", 5)) * time.Second,
+		QwenAPITimeout:            time.Duration(getEnvInt("QWEN_API_TIMEOUT_SECONDS", 120)) * time.Second,
 		DecayLambda:               getEnvFloat("DECAY_LAMBDA", 0.1),
 		ArchiveThreshold:          getEnvFloat("ARCHIVE_THRESHOLD", 0.15),
 		RelevanceDeltaEpsilon:     getEnvFloat("RELEVANCE_DELTA_EPSILON", 0.01),
@@ -70,6 +74,8 @@ func Load() (*Config, error) {
 		WSEnabled:                 getEnvBool("QUILL_WS_ENABLED", true),
 		MaxContextTokens:          getEnvInt("QWEN_MAX_CONTEXT_TOKENS", 30000),
 		ResponseReserve:           getEnvInt("QWEN_RESPONSE_RESERVE", 2000),
+		ContradictionAgentDepth:   getEnvInt("CONTRADICTION_AGENT_DEPTH", 3),
+		PlotHoleAgentDepth:        getEnvInt("PLOT_HOLE_AGENT_DEPTH", 2),
 	}
 
 	if cfg.QwenAPIKey == "" {

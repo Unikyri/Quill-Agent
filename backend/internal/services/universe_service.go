@@ -185,5 +185,16 @@ func (s *UniverseService) Delete(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// Best-effort: drop the universe's AGE graph so it doesn't leak into
+	// ag_catalog forever. The relational delete already committed.
+	if s.graphRepo != nil {
+		if err := s.graphRepo.DropGraph(ctx, "universe_"+id.String()); err != nil {
+			log.Printf("[universe] drop graph for %s: %v", id, err)
+		}
+	}
+	return nil
 }

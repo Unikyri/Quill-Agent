@@ -177,7 +177,7 @@ func (s *MemoryService) RecallWithQuery(ctx context.Context, universeID uuid.UUI
 	fused := fuseRRF(ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated)
 
 	if s.budgetMgr != nil {
-		fused = s.fitToBudget(fused)
+		fused = s.fitToBudget(fused, queryText)
 	}
 
 	if k > 0 && len(fused) > k {
@@ -397,11 +397,12 @@ func (s *MemoryService) RecallExplain(ctx context.Context, universeID uuid.UUID,
 		for i := range items {
 			ranked[i] = RankedItem{Text: items[i].Fact, Score: items[i].RRFScore}
 		}
-		survivors, alloc := s.budgetSurvivors(ranked)
+		survivors, alloc, tokensUsed := s.budgetSurvivors(ranked, s.budgetMgr.tok.CountTokens(queryText))
 		for i := range items {
 			items[i].FitInBudget = survivors[items[i].Fact]
 		}
 		budget = alloc.Report(s.budgetMgr.maxContextTokens)
+		budget.VectorTokensUsed = tokensUsed
 	} else {
 		for i := range items {
 			items[i].FitInBudget = true
@@ -542,26 +543,26 @@ func extractEntityIDFromNode(nodeStr string) (uuid.UUID, bool) {
 // fitToBudget (which DROPS non-survivors from the recall path) and
 // RecallExplain (which FLAGS them via FitInBudget), so the two can never drift
 // (ADR-4: assumes near-unique facts per call). Callers guarantee budgetMgr != nil.
-func (s *MemoryService) budgetSurvivors(ranked []RankedItem) (map[string]bool, BudgetAllocation) {
-	alloc := s.budgetMgr.ComputeBudget(0, 0)
-	fitted, _, _ := s.budgetMgr.FitToBudget(ranked, alloc.VectorTokens)
+func (s *MemoryService) budgetSurvivors(ranked []RankedItem, queryTokens int) (map[string]bool, BudgetAllocation, int) {
+	alloc := s.budgetMgr.ComputeBudget(0, queryTokens)
+	fitted, _, tokensUsed := s.budgetMgr.FitToBudget(ranked, alloc.VectorTokens)
 	survivors := make(map[string]bool, len(fitted))
 	for _, f := range fitted {
 		survivors[f.Text] = true
 	}
-	return survivors, alloc
+	return survivors, alloc, tokensUsed
 }
 
 // fitToBudget drops fused items that don't fit the VectorTokens budget,
 // preserving the fused (RRF) order of the survivors — deterministic on score
 // ties, unlike re-emitting the internally re-sorted fitted list.
-func (s *MemoryService) fitToBudget(fused []HybridRecallItem) []HybridRecallItem {
+func (s *MemoryService) fitToBudget(fused []HybridRecallItem, queryText string) []HybridRecallItem {
 	ranked := make([]RankedItem, len(fused))
 	for i := range fused {
 		ranked[i] = RankedItem{Text: fused[i].Fact, Score: fused[i].RRFScore}
 	}
 
-	survivors, _ := s.budgetSurvivors(ranked)
+	survivors, _, _ := s.budgetSurvivors(ranked, s.budgetMgr.tok.CountTokens(queryText))
 
 	result := make([]HybridRecallItem, 0, len(fused))
 	for i := range fused {

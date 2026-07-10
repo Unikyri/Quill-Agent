@@ -14,7 +14,7 @@ import (
 // against the ingestion_jobs table (migration 012).
 func TestIngestionRepoCRUD(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "012")
+	testutil.RunMigrationsUpTo(t, pool, "020")
 
 	repo := NewIngestionRepo(pool)
 	ctx := context.Background()
@@ -38,7 +38,7 @@ func TestIngestionRepoCRUD(t *testing.T) {
 	}
 
 	// Create
-	err := repo.Create(ctx, jobID, universeID, workID, "pending", filename)
+	err := repo.Create(ctx, jobID, universeID, workID, "pending", filename, "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestIngestionRepoCRUD(t *testing.T) {
 // for non-existent jobs.
 func TestIngestionRepoFindByIDNotFound(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "012")
+	testutil.RunMigrationsUpTo(t, pool, "020")
 
 	repo := NewIngestionRepo(pool)
 	ctx := context.Background()

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -64,6 +65,14 @@ func (m *mockQwenForIngestion) GenerateEmbedding(ctx context.Context, text strin
 	return []float32{0.1, 0.2, 0.3}, nil
 }
 
+func (m *mockQwenForIngestion) GenerateEmbeddingBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		out[i] = []float32{0.1, 0.2, 0.3}
+	}
+	return out, nil
+}
+
 // ── Test: pipeline sequence ──
 
 // TestIngestionServicePipeline verifies the chunk→extract→embed→graph sequence
@@ -96,11 +105,13 @@ Frodo learns about the Ring.`
 	}
 
 	universeID := uuid.New()
-	workID := uuid.New()
 
-	jobID, err := svc.Start(context.Background(), universeID, workID, strings.NewReader(docContent), "test.md")
+	jobID, duplicate, err := svc.Start(context.Background(), universeID, strings.NewReader(docContent), "test.md")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+	if duplicate {
+		t.Error("expected duplicate=false for first upload")
 	}
 	if jobID == uuid.Nil {
 		t.Error("expected non-nil job ID")
@@ -198,6 +209,82 @@ func TestIngestionServiceEmptyDocument(t *testing.T) {
 	}
 }
 
+// TestIngestionServiceHeaderlessFallback verifies a headerless document is split
+// into ~50K-char paragraph-boundary chunks titled "Part N".
+func TestIngestionServiceHeaderlessFallback(t *testing.T) {
+	svc := &IngestionService{}
+
+	para := strings.Repeat("A paragraph with enough characters to fill space. ", 200)
+	var b strings.Builder
+	for i := 0; i < 12; i++ {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(fmt.Sprintf("Paragraph %d: %s", i, para))
+	}
+	content := b.String()
+
+	chunks := svc.splitChunks(content)
+	if len(chunks) <= 1 {
+		t.Fatalf("expected multiple chunks for headerless large doc, got %d", len(chunks))
+	}
+
+	joined := ""
+	for i, ch := range chunks {
+		joined += ch.content
+		if len(ch.content) == 0 {
+			t.Errorf("chunk %d is empty", i)
+		}
+		if len(ch.content) > 50_000 {
+			t.Errorf("chunk %d length %d exceeds 50K", i, len(ch.content))
+		}
+		wantTitle := fmt.Sprintf("Part %d", i+1)
+		if ch.title != wantTitle {
+			t.Errorf("chunk %d title = %q, want %q", i, ch.title, wantTitle)
+		}
+	}
+
+	for i := 0; i < 12; i++ {
+		marker := fmt.Sprintf("Paragraph %d:", i)
+		if !strings.Contains(joined, marker) {
+			t.Errorf("missing paragraph marker %q", marker)
+		}
+	}
+}
+
+// TestSplitByParagraphsSmallDoc verifies a small headerless document stays as
+// a single chunk.
+func TestSplitByParagraphsSmallDoc(t *testing.T) {
+	content := "A short document.\n\nWith two paragraphs."
+	chunks := splitByParagraphs(content)
+	if len(chunks) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(chunks))
+	}
+	if chunks[0].title != "Untitled" {
+		t.Errorf("title = %q, want Untitled", chunks[0].title)
+	}
+	if chunks[0].content != strings.TrimSpace(content) {
+		t.Errorf("content mismatch: got %d chars, want %d chars", len(chunks[0].content), len(strings.TrimSpace(content)))
+	}
+}
+
+// TestSplitByParagraphsOversizedParagraph verifies a single paragraph larger
+// than the chunk cap becomes its own chunk rather than being dropped.
+func TestSplitByParagraphsOversizedParagraph(t *testing.T) {
+	big := strings.Repeat("a", 60_000)
+	content := big + "\n\nsmall"
+	chunks := splitByParagraphs(content)
+	if len(chunks) < 1 {
+		t.Fatalf("expected at least 1 chunk, got %d", len(chunks))
+	}
+	if chunks[0].title != "Part 1" {
+		t.Errorf("first chunk title = %q, want Part 1", chunks[0].title)
+	}
+	if len(chunks[0].content) != 60_000 {
+		t.Errorf("first chunk length = %d, want 60000", len(chunks[0].content))
+	}
+}
+
 // TestIngestionServiceNilDeps verifies Start can handle nil dependencies gracefully.
 func TestIngestionServiceNilDeps(t *testing.T) {
 	svc := &IngestionService{
@@ -210,7 +297,7 @@ func TestIngestionServiceNilDeps(t *testing.T) {
 	}
 
 	// Start should attempt to create a job; may fail if pool is nil
-	jobID, err := svc.Start(context.Background(), uuid.New(), uuid.New(), strings.NewReader("hello"), "test.md")
+	jobID, _, err := svc.Start(context.Background(), uuid.New(), strings.NewReader("hello"), "test.md")
 	if err != nil {
 		// Expected when pool is nil — service can't persist the job
 		t.Logf("Start with nil deps: jobID=%s err=%v", jobID, err)
@@ -224,12 +311,11 @@ func TestIngestionServiceNilDeps(t *testing.T) {
 // not uuid.Nil (see sdd/fix-ingestion-progress-delivery).
 func TestIngestionProgressDeliveredToUniverseOwner(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "012")
+	testutil.RunMigrationsUpTo(t, pool, "020")
 	ctx := context.Background()
 
 	user := svcCreateTestUser(t, ctx, pool)
 	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
-	work := svcCreateTestWork(t, ctx, pool, universe.ID)
 
 	hub := &mockIngestionHub{}
 	svc := &IngestionService{
@@ -243,7 +329,7 @@ func TestIngestionProgressDeliveredToUniverseOwner(t *testing.T) {
 
 	docContent := "# Chapter 1\n\nBody text."
 
-	_, err := svc.Start(ctx, universe.ID, work.ID, strings.NewReader(docContent), "t.md")
+	_, _, err := svc.Start(ctx, universe.ID, strings.NewReader(docContent), "t.md")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

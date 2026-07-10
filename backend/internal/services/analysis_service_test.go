@@ -392,6 +392,81 @@ func TestExtractEntities_ActiveEntityNoReactivate(t *testing.T) {
 	}
 }
 
+// TestProcessJobSkipsDuplicateParagraph verifies the in-memory paragraph
+// dedup: two processJob calls with identical chapter+text must hit Qwen's
+// ExtractEntities exactly once — the second call short-circuits before any
+// service fan-out.
+func TestProcessJobSkipsDuplicateParagraph(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		resp := QwenResponse{
+			Choices: []struct {
+				Message struct {
+					Content   string         `json:"content"`
+					ToolCalls []QwenToolCall `json:"tool_calls,omitempty"`
+				} `json:"message"`
+			}{
+				{Message: struct {
+					Content   string         `json:"content"`
+					ToolCalls []QwenToolCall `json:"tool_calls,omitempty"`
+				}{Content: `{"characters":[],"places":[],"events":[],"factions":[],"world_rules":[],"plot_developments":[]}`}},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		QwenBaseURL:          server.URL,
+		QwenAPIKey:           "test-key",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
+	}
+	qwenSvc := NewQwenService(cfg, nil)
+
+	// Lazy pool: never actually connects since the empty extraction result
+	// keeps every DB-touching branch gated off.
+	pool, err := pgxpool.New(context.Background(), "postgres://u:p@127.0.0.1:1/db?sslmode=disable")
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	defer pool.Close()
+
+	svc := NewAnalysisService(pool, &spyEntityResolvr{}, nil, nil, nil, nil, qwenSvc, nil, nil)
+
+	job := analysisJob{
+		WorkID:     uuid.New(),
+		ChapterID:  uuid.New(),
+		UniverseID: uuid.New(),
+		Text:       "The same paragraph, submitted twice.",
+		UserID:     uuid.New(),
+	}
+
+	for i := 0; i < 2; i++ {
+		result, err := svc.processJob(context.Background(), job)
+		if err != nil {
+			t.Fatalf("processJob run %d: %v", i+1, err)
+		}
+		if i == 0 && result == nil {
+			t.Error("first processJob returned nil result, want a real result")
+		}
+		if i == 1 && result != nil {
+			t.Error("duplicate processJob returned non-nil result, want nil so nothing is broadcast")
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("ExtractEntities HTTP calls = %d, want 1 (duplicate paragraph must be skipped)", calls)
+	}
+}
+
 // stageRecordingHub is a fake AnalysisHub that records every message sent,
 // in send order — used to assert analysis_progress stage ordering.
 type stageRecordingHub struct {
@@ -625,10 +700,10 @@ func svcCreateAnalysisRepos(pool *pgxpool.Pool) analysisTestRepos {
 func svcCreateAnalysisServices(pool *pgxpool.Pool, repos analysisTestRepos) analysisTestServices {
 	qwenSvc := NewQwenService(&config.Config{QwenMaxConcurrency: 1, QwenTurboConcurrency: 1}, nil) // minimal config = no real API calls
 	entitySvc := NewEntityService(pool, repos.entity, repos.vector, qwenSvc)
-	contraSvc := NewContradictionService(pool, repos.contradiction, repos.entity, qwenSvc, nil, 3, nil)
+	contraSvc := NewContradictionService(pool, repos.contradiction, repos.entity, qwenSvc, nil, 3, nil, 3)
 	relevSvc := NewRelevanceService(pool, repos.entity, 0.1, 0.15, nil)
 	timelineSvc := NewTimelineService(pool, repos.timeline, nil, nil)
-	plotHoleSvc := NewPlotHoleService(pool, repos.plotHole, repos.entity, 8, nil, nil)
+	plotHoleSvc := NewPlotHoleService(pool, repos.plotHole, repos.entity, 8, nil, nil, 2)
 
 	return analysisTestServices{
 		entitySvc:   entitySvc,

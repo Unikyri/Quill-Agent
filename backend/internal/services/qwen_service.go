@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -33,7 +32,7 @@ type QwenService struct {
 // QwenService without a tokenizer.
 func NewQwenService(cfg *config.Config, budgetMgr *ContextBudgetManager) *QwenService {
 	return &QwenService{
-		client:     &http.Client{Timeout: 30 * time.Second},
+		client:     &http.Client{Timeout: cfg.QwenAPITimeout},
 		baseURL:    cfg.QwenBaseURL,
 		apiKey:     cfg.QwenAPIKey,
 		maxSem:     make(chan struct{}, cfg.QwenMaxConcurrency),
