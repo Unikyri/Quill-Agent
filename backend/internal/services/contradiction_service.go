@@ -26,6 +26,7 @@ type ContradictionService struct {
 	executor      ToolExecutor
 	maxCandidates int
 	budgetMgr     *ContextBudgetManager
+	agentDepth    int
 }
 
 // NewContradictionService creates a contradiction service.
@@ -33,7 +34,7 @@ type ContradictionService struct {
 // executor may be nil — CheckSemantic falls back to batch mode without agent loop.
 // budgetMgr may be nil — CheckSemantic then concatenates all entities uncapped
 // (current behavior).
-func NewContradictionService(pool *pgxpool.Pool, contraRepo *repositories.ContradictionRepo, entityRepo *repositories.EntityRepo, qwenSvc *QwenService, executor ToolExecutor, maxCandidates int, budgetMgr *ContextBudgetManager) *ContradictionService {
+func NewContradictionService(pool *pgxpool.Pool, contraRepo *repositories.ContradictionRepo, entityRepo *repositories.EntityRepo, qwenSvc *QwenService, executor ToolExecutor, maxCandidates int, budgetMgr *ContextBudgetManager, agentDepth int) *ContradictionService {
 	return &ContradictionService{
 		pool:          pool,
 		contraRepo:    contraRepo,
@@ -42,6 +43,7 @@ func NewContradictionService(pool *pgxpool.Pool, contraRepo *repositories.Contra
 		executor:      executor,
 		maxCandidates: maxCandidates,
 		budgetMgr:     budgetMgr,
+		agentDepth:    agentDepth,
 	}
 }
 
@@ -213,9 +215,9 @@ IMPORTANT: Use the tools to gather context BEFORE making your decision. Only ret
 	var answer string
 	var err error
 	if progress != nil {
-		answer, err = s.qwenSvc.RunAgentLoopStream(ctx, messages, tools, s.executor, 5, progress)
+		answer, err = s.qwenSvc.RunAgentLoopStream(ctx, messages, tools, s.executor, s.agentDepth, progress)
 	} else {
-		answer, err = s.qwenSvc.RunAgentLoop(ctx, messages, tools, s.executor, 5)
+		answer, err = s.qwenSvc.RunAgentLoop(ctx, messages, tools, s.executor, s.agentDepth)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("check semantic: %w", err)

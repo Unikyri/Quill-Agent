@@ -12,16 +12,24 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+
+	"github.com/quill/backend/internal/models"
 )
 
 // mockIngestionSvc returns a fixed job ID and records calls.
 type mockIngestionSvc struct {
-	jobID uuid.UUID
-	err   error
+	jobID     uuid.UUID
+	duplicate bool
+	err       error
+	jobs      []models.IngestionJob
 }
 
-func (m *mockIngestionSvc) Start(ctx context.Context, universeID, workID uuid.UUID, reader io.Reader, filename string) (uuid.UUID, error) {
-	return m.jobID, m.err
+func (m *mockIngestionSvc) Start(ctx context.Context, universeID uuid.UUID, reader io.Reader, filename string) (uuid.UUID, bool, error) {
+	return m.jobID, m.duplicate, m.err
+}
+
+func (m *mockIngestionSvc) ListJobs(ctx context.Context, universeID uuid.UUID) ([]models.IngestionJob, error) {
+	return m.jobs, m.err
 }
 
 // TestIngestionHandlerPost verifies:
@@ -71,6 +79,77 @@ func TestIngestionHandlerPost(t *testing.T) {
 	}
 	if body["status"] != "accepted" {
 		t.Errorf("status: got %q, want %q", body["status"], "accepted")
+	}
+}
+
+// TestIngestionHandlerDuplicate verifies a duplicate upload responds 200
+// with status "duplicate" and the existing job's ID.
+func TestIngestionHandlerDuplicate(t *testing.T) {
+	app := fiber.New()
+
+	jobID := uuid.New()
+	h := &IngestionHandler{ingestionSvc: &mockIngestionSvc{jobID: jobID, duplicate: true}}
+	app.Post("/api/v1/universes/:id/ingest", h.Ingest)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	part, err := w.CreateFormFile("file", "document.md")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	_, _ = part.Write([]byte("# Chapter 1\nTest content."))
+	w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/universes/"+uuid.New().String()+"/ingest", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for duplicate, got %d", resp.StatusCode)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "duplicate" {
+		t.Errorf("status: got %q, want %q", body["status"], "duplicate")
+	}
+	if body["job_id"] != jobID.String() {
+		t.Errorf("job_id: got %q, want %q", body["job_id"], jobID.String())
+	}
+}
+
+// TestIngestionHandlerJobs verifies GET /universes/:id/ingestions returns
+// the service's job list.
+func TestIngestionHandlerJobs(t *testing.T) {
+	app := fiber.New()
+
+	job := models.IngestionJob{ID: uuid.New(), Status: "completed"}
+	h := &IngestionHandler{ingestionSvc: &mockIngestionSvc{jobs: []models.IngestionJob{job}}}
+	app.Get("/api/v1/universes/:id/ingestions", h.Jobs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/universes/"+uuid.New().String()+"/ingestions", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Jobs []models.IngestionJob `json:"jobs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Jobs) != 1 || body.Jobs[0].ID != job.ID {
+		t.Errorf("jobs: got %+v, want one job with ID %s", body.Jobs, job.ID)
 	}
 }
 

@@ -28,6 +28,10 @@ type BudgetReport struct {
 	VectorTokens     int     `json:"vector_tokens"`
 	ToolsTokens      int     `json:"tools_tokens"`
 	UsedPercent      float64 `json:"used_percent"`
+	// VectorTokensUsed is how many tokens of the VectorTokens allocation the
+	// fitted recall items actually consumed. Set by RecallExplain; zero for
+	// reports built straight from an allocation.
+	VectorTokensUsed int `json:"vector_tokens_used"`
 }
 
 // Report summarizes a into a BudgetReport against maxContext, the context

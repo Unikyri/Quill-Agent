@@ -134,6 +134,7 @@ type IngestionJob struct {
 	TotalChaptersDetected  int        `json:"total_chapters_detected"`
 	ChaptersProcessed      int        `json:"chapters_processed"`
 	EntitiesExtracted      int        `json:"entities_extracted"`
+	ContentHash            string     `json:"content_hash,omitempty"`
 	ErrorMessage           string     `json:"error_message,omitempty"`
 	StartedAt              *time.Time `json:"started_at,omitempty"`
 	CompletedAt            *time.Time `json:"completed_at,omitempty"`

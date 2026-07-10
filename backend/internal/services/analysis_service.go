@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -71,6 +73,12 @@ type AnalysisService struct {
 	queues  map[uuid.UUID]chan analysisJob
 	cancels map[uuid.UUID]context.CancelFunc
 	mu      sync.Mutex
+
+	// seen dedups identical paragraph submissions (debounce re-sends, WS
+	// reconnects) by sha256(chapterID|text) so the full Qwen fan-out runs
+	// once per unique text.
+	seenMu sync.Mutex
+	seen   map[string]struct{}
 }
 
 // NewAnalysisService creates an analysis service. All parameters may be nil
@@ -98,6 +106,7 @@ func NewAnalysisService(
 		memorySvc:   memorySvc,
 		queues:      make(map[uuid.UUID]chan analysisJob),
 		cancels:     make(map[uuid.UUID]context.CancelFunc),
+		seen:        make(map[string]struct{}),
 	}
 }
 
@@ -229,6 +238,26 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 		WorkID:    job.WorkID,
 		ChapterID: job.ChapterID,
 	}
+
+	// Skip identical re-submissions of the same paragraph text (editor
+	// debounce, WS reconnect) — any edit changes the hash and re-analyzes.
+	sum := sha256.Sum256([]byte(job.ChapterID.String() + "|" + job.Text))
+	key := hex.EncodeToString(sum[:])
+	s.seenMu.Lock()
+	if _, dup := s.seen[key]; dup {
+		s.seenMu.Unlock()
+		log.Printf("[analysis] skip duplicate paragraph chapter=%s", job.ChapterID)
+		// nil result: a skip must not broadcast an analysis_result that looks
+		// like "re-analyzed, zero findings" to the client.
+		return nil, nil
+	}
+	// ponytail: flat 4096-entry ceiling, wholesale clear on overflow — swap
+	// for an LRU if eviction churn ever matters.
+	if len(s.seen) > 4096 {
+		s.seen = make(map[string]struct{})
+	}
+	s.seen[key] = struct{}{}
+	s.seenMu.Unlock()
 
 	// ── Core Pass (deterministic, fast) ──
 
@@ -368,8 +397,10 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 		p.ContradictionCount = &contradictionCount
 	})
 
-	// 5. Scan for plot holes
-	if s.plotHoleSvc != nil {
+	// 5. Scan for plot holes — gated on extracted entities like steps 2 and 4:
+	// a paragraph with no entities doesn't touch relevance, so the scan would
+	// return the same result as the previous one at pure qwen-max cost.
+	if s.plotHoleSvc != nil && len(resolvedEntities) > 0 {
 		holes, err := s.plotHoleSvc.Scan(ctx, job.UniverseID, job.ChapterID)
 		if err != nil {
 			log.Printf("[analysis] plot hole scan: %v", err)

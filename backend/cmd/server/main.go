@@ -115,9 +115,9 @@ func main() {
 	}
 
 	timelineSvc := services.NewTimelineService(pool, timelineRepo, qwenSvc, executor)
-	plotHoleSvc := services.NewPlotHoleService(pool, plotHoleRepo, entityRepo, cfg.PlotHoleChapters, qwenSvc, executor)
+	plotHoleSvc := services.NewPlotHoleService(pool, plotHoleRepo, entityRepo, cfg.PlotHoleChapters, qwenSvc, executor, cfg.PlotHoleAgentDepth)
 
-	contraSvc := services.NewContradictionService(pool, contradictionRepo, entityRepo, qwenSvc, executor, cfg.MaxContradictionCandidates, budgetMgr)
+	contraSvc := services.NewContradictionService(pool, contradictionRepo, entityRepo, qwenSvc, executor, cfg.MaxContradictionCandidates, budgetMgr, cfg.ContradictionAgentDepth)
 
 	// WebSocket Hub (created first with nil submitter/recaller — set later to avoid circular init)
 	hub := ws.NewHub(authSvc, nil, memorySvc, qwenSvc)
@@ -167,6 +167,11 @@ func main() {
 	auth.Post("/register", authH.Register)
 	auth.Post("/login", authH.Login)
 
+	// WebSocket route (public, self-authenticating via auth_init message)
+	if cfg.WSEnabled {
+		app.Get("/api/v1/ws", websocket.New(hub.Handle))
+	}
+
 	// Protected routes
 	api := app.Group("/api/v1")
 	api.Use(middleware.AuthMiddleware(authSvc))
@@ -214,11 +219,7 @@ func main() {
 	api.Get("/universes/:id/memory-status", graphH.MemoryStatus)
 	api.Post("/universes/:id/decay", graphH.RunDecay)
 	api.Post("/universes/:id/ingest", ingestionH.Ingest)
-
-	// WebSocket route (gated by config)
-	if cfg.WSEnabled {
-		app.Get("/api/v1/ws", websocket.New(hub.Handle))
-	}
+	api.Get("/universes/:id/ingestions", ingestionH.Jobs)
 
 	// Demo (public)
 	app.Post("/api/v1/demo/clone", demoH.Clone)

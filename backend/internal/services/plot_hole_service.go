@@ -20,9 +20,10 @@ type PlotHoleService struct {
 	chapters     int // inactivity threshold
 	qwenSvc      *QwenService
 	executor     *QuillExecutor
+	agentDepth   int
 }
 
-func NewPlotHoleService(pool *pgxpool.Pool, plotHoleRepo *repositories.PlotHoleRepo, entityRepo *repositories.EntityRepo, chapters int, qwenSvc *QwenService, executor *QuillExecutor) *PlotHoleService {
+func NewPlotHoleService(pool *pgxpool.Pool, plotHoleRepo *repositories.PlotHoleRepo, entityRepo *repositories.EntityRepo, chapters int, qwenSvc *QwenService, executor *QuillExecutor, agentDepth int) *PlotHoleService {
 	return &PlotHoleService{
 		pool:         pool,
 		plotHoleRepo: plotHoleRepo,
@@ -30,6 +31,7 @@ func NewPlotHoleService(pool *pgxpool.Pool, plotHoleRepo *repositories.PlotHoleR
 		chapters:     chapters,
 		qwenSvc:      qwenSvc,
 		executor:     executor,
+		agentDepth:   agentDepth,
 	}
 }
 
@@ -157,7 +159,7 @@ Use search_vector_memory to find relevant context before making your decision.`,
 		exec = s.executor
 	}
 
-	result, err := s.qwenSvc.RunAgentLoop(ctx, messages, tools, exec, 3)
+	result, err := s.qwenSvc.RunAgentLoop(ctx, messages, tools, exec, s.agentDepth)
 	if err != nil {
 		return false, fmt.Errorf("agent evaluation: %w", err)
 	}

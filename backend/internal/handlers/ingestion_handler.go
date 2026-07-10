@@ -6,11 +6,14 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+
+	"github.com/quill/backend/internal/models"
 )
 
 // IngestionStarter is the minimal service interface for the ingestion handler.
 type IngestionStarter interface {
-	Start(ctx context.Context, universeID, workID uuid.UUID, reader io.Reader, filename string) (uuid.UUID, error)
+	Start(ctx context.Context, universeID uuid.UUID, reader io.Reader, filename string) (jobID uuid.UUID, duplicate bool, err error)
+	ListJobs(ctx context.Context, universeID uuid.UUID) ([]models.IngestionJob, error)
 }
 
 // IngestionHandler handles document upload for async ingestion.
@@ -51,15 +54,17 @@ func (h *IngestionHandler) Ingest(c *fiber.Ctx) error {
 	}
 	defer f.Close()
 
-	// ponytail: work_id follows universe_id for now. A future UI can let users
-	// select which work to ingest into.
-	const placeholderWorkID = "00000000-0000-0000-0000-000000000000"
-	workID, _ := uuid.Parse(placeholderWorkID)
-
-	jobID, err := h.ingestionSvc.Start(c.Context(), universeID, workID, f, file.Filename)
+	jobID, duplicate, err := h.ingestionSvc.Start(c.Context(), universeID, f, file.Filename)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+		})
+	}
+
+	if duplicate {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"job_id": jobID.String(),
+			"status": "duplicate",
 		})
 	}
 
@@ -67,4 +72,23 @@ func (h *IngestionHandler) Ingest(c *fiber.Ctx) error {
 		"job_id": jobID.String(),
 		"status": "accepted",
 	})
+}
+
+// Jobs handles GET /api/v1/universes/:id/ingestions.
+func (h *IngestionHandler) Jobs(c *fiber.Ctx) error {
+	universeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
+		})
+	}
+
+	jobs, err := h.ingestionSvc.ListJobs(c.Context(), universeID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(fiber.Map{"jobs": jobs})
 }

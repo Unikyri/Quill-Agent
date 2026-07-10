@@ -36,7 +36,7 @@ func TestPlotHoleServiceScanDetectsStaleArc(t *testing.T) {
 		t.Fatalf("set last_mentioned: %v", err)
 	}
 
-	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil)
+	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil, 2)
 
 	holes, err := svc.Scan(ctx, universe.ID, ch10.ID)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestPlotHoleServiceScanNoGap(t *testing.T) {
 		t.Fatalf("set last_mentioned: %v", err)
 	}
 
-	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil)
+	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil, 2)
 
 	holes, err := svc.Scan(ctx, universe.ID, ch5.ID)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestPlotHoleServiceScanMixed(t *testing.T) {
 	recent := svcCreateTestEntity(t, ctx, pool, universe.ID, "Recent Arc", 0.6, "active")
 	pool.Exec(ctx, "UPDATE entities SET last_mentioned_chapter_id = $1, last_mentioned_at = NOW() WHERE id = $2", ch8.ID, recent.ID)
 
-	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil)
+	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil, 2)
 
 	holes, err := svc.Scan(ctx, universe.ID, ch10.ID)
 	if err != nil {
@@ -130,7 +130,7 @@ func TestPlotHoleServiceScanNoLastMentioned(t *testing.T) {
 	// Entity with NULL last_mentioned — never mentioned
 	svcCreateTestEntity(t, ctx, pool, universe.ID, "Never Mentioned", 0.8, "active")
 
-	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil)
+	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil, 2)
 
 	holes, err := svc.Scan(ctx, universe.ID, ch3.ID)
 	if err != nil {
@@ -165,7 +165,7 @@ func TestPlotHoleServiceScanRelevanceFilter(t *testing.T) {
 		t.Fatalf("set last_mentioned: %v", err)
 	}
 
-	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil)
+	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, nil, nil, 2)
 
 	holes, err := svc.Scan(ctx, universe.ID, ch10.ID)
 	if err != nil {
@@ -226,7 +226,7 @@ func TestPlotHoleServiceScanAgentVerdict(t *testing.T) {
 		t.Fatalf("set last_mentioned: %v", err)
 	}
 
-	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, qwenSvc, nil)
+	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, qwenSvc, nil, 2)
 
 	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -289,7 +289,7 @@ func TestPlotHoleServiceScanAgentNoVerdict(t *testing.T) {
 	pool.Exec(ctx, "UPDATE entities SET last_mentioned_chapter_id = $1, last_mentioned_at = NOW() WHERE id = $2",
 		ch1.ID, staleEntity.ID)
 
-	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, qwenSvc, nil)
+	svc := NewPlotHoleService(pool, repositories.NewPlotHoleRepo(pool), repositories.NewEntityRepo(pool), 8, qwenSvc, nil, 2)
 
 	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
