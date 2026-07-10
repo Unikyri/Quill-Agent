@@ -25,6 +25,7 @@ type QwenService struct {
 	maxModel   string
 	turboModel string
 	embModel   string
+	embDims    int
 }
 
 // budgetMgr may be nil — RunAgentLoop then skips tool-result compression
@@ -41,6 +42,7 @@ func NewQwenService(cfg *config.Config, budgetMgr *ContextBudgetManager) *QwenSe
 		maxModel:   cfg.QwenMaxModel,
 		turboModel: cfg.QwenTurboModel,
 		embModel:   cfg.QwenEmbeddingModel,
+		embDims:    cfg.QwenEmbeddingDims,
 	}
 }
 
@@ -138,6 +140,11 @@ type QwenResponse struct {
 type EmbeddingRequest struct {
 	Model string   `json:"model"`
 	Input []string `json:"input"`
+	// Dimensions pins the output vector size. The pgvector columns are
+	// hardcoded vector(1024) (migrations 007/008/017), so a model whose
+	// default dimension differs (e.g. text-embedding-v4) must be told to emit
+	// 1024 or every insert fails. Omitted when unset (0).
+	Dimensions int `json:"dimensions,omitempty"`
 }
 
 type EmbeddingResponse struct {
@@ -315,8 +322,9 @@ Respond with ONLY valid JSON in this format:
 
 func (s *QwenService) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	payload := EmbeddingRequest{
-		Model: s.embModel,
-		Input: []string{text},
+		Model:      s.embModel,
+		Input:      []string{text},
+		Dimensions: s.embDims,
 	}
 
 	respBody, err := s.callEmbedding(ctx, payload)
@@ -333,13 +341,29 @@ func (s *QwenService) GenerateEmbedding(ctx context.Context, text string) ([]flo
 		return nil, fmt.Errorf("no embeddings in response")
 	}
 
-	return embResp.Data[0].Embedding, nil
+	emb := embResp.Data[0].Embedding
+	if err := s.checkEmbeddingDims(len(emb)); err != nil {
+		return nil, err
+	}
+	return emb, nil
+}
+
+// checkEmbeddingDims guards against persisting a wrong-dimension vector into
+// the hardcoded vector(1024) columns. A silent mismatch corrupts the vector
+// space (cosine similarity becomes meaningless); a hard insert failure is the
+// good case. Only enforced when a dimension is configured (> 0).
+func (s *QwenService) checkEmbeddingDims(got int) error {
+	if s.embDims > 0 && got != s.embDims {
+		return fmt.Errorf("embedding dimension mismatch: model %q returned %d, expected %d (check QWEN_EMBEDDING_DIMENSIONS / QWEN_EMBEDDING_MODEL)", s.embModel, got, s.embDims)
+	}
+	return nil
 }
 
 func (s *QwenService) GenerateEmbeddingBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	payload := EmbeddingRequest{
-		Model: s.embModel,
-		Input: texts,
+		Model:      s.embModel,
+		Input:      texts,
+		Dimensions: s.embDims,
 	}
 
 	respBody, err := s.callEmbedding(ctx, payload)
@@ -354,6 +378,9 @@ func (s *QwenService) GenerateEmbeddingBatch(ctx context.Context, texts []string
 
 	result := make([][]float32, len(texts))
 	for _, d := range embResp.Data {
+		if err := s.checkEmbeddingDims(len(d.Embedding)); err != nil {
+			return nil, err
+		}
 		result[d.Index] = d.Embedding
 	}
 

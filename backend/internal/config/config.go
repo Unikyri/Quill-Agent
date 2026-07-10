@@ -40,6 +40,7 @@ type Config struct {
 	ResponseReserve          int
 	ContradictionAgentDepth  int
 	PlotHoleAgentDepth       int
+	IngestAnalysisMaxChapters int
 }
 
 func Load() (*Config, error) {
@@ -76,6 +77,7 @@ func Load() (*Config, error) {
 		ResponseReserve:           getEnvInt("QWEN_RESPONSE_RESERVE", 2000),
 		ContradictionAgentDepth:   getEnvInt("CONTRADICTION_AGENT_DEPTH", 3),
 		PlotHoleAgentDepth:        getEnvInt("PLOT_HOLE_AGENT_DEPTH", 2),
+		IngestAnalysisMaxChapters: getEnvInt("INGEST_ANALYSIS_MAX_CHAPTERS", 8),
 	}
 
 	if cfg.QwenAPIKey == "" {

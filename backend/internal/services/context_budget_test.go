@@ -158,3 +158,71 @@ func TestFitToBudgetEmpty(t *testing.T) {
 		t.Errorf("tokensUsed = %d, want 0", tokensUsed)
 	}
 }
+
+func TestTruncateToTokensEmpty(t *testing.T) {
+	tok := NewTokenizer()
+	mgr := NewContextBudgetManager(tok, 30000, 2000)
+
+	if got := mgr.TruncateToTokens("", 100); got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+	if got := mgr.TruncateToTokens("some text", 0); got != "" {
+		t.Errorf("budget=0: got %q, want empty string", got)
+	}
+}
+
+func TestTruncateToTokensFitsExactly(t *testing.T) {
+	tok := NewTokenizer()
+	mgr := NewContextBudgetManager(tok, 30000, 2000)
+
+	text := "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+	budget := tok.CountTokens(text) + 10 // comfortably fits all of it
+
+	got := mgr.TruncateToTokens(text, budget)
+	if got != text {
+		t.Errorf("expected all paragraphs preserved in order, got %q", got)
+	}
+}
+
+func TestTruncateToTokensDropsTrailingParagraphs(t *testing.T) {
+	tok := NewTokenizer()
+	mgr := NewContextBudgetManager(tok, 30000, 2000)
+
+	p1 := "Alpha paragraph with some words."
+	p2 := "Beta paragraph with some more words."
+	p3 := "Gamma paragraph, the last one, with even more words than the others."
+	text := p1 + "\n\n" + p2 + "\n\n" + p3
+
+	budget := tok.CountTokens(p1) + tok.CountTokens(p2) + 1 // fits p1+p2, not p3
+
+	got := mgr.TruncateToTokens(text, budget)
+	if got != p1+"\n\n"+p2 {
+		t.Errorf("got %q, want %q", got, p1+"\n\n"+p2)
+	}
+}
+
+// TestTruncateToTokensSingleParagraphOverBudget pins the decided behavior for
+// the previously-unpinned edge case: a single paragraph alone larger than the
+// budget is truncated at the token level rather than dropped to empty text.
+func TestTruncateToTokensSingleParagraphOverBudget(t *testing.T) {
+	tok := NewTokenizer()
+	mgr := NewContextBudgetManager(tok, 30000, 2000)
+
+	bigParagraph := ""
+	for i := 0; i < 500; i++ {
+		bigParagraph += "word "
+	}
+
+	budget := 10
+	got := mgr.TruncateToTokens(bigParagraph, budget)
+
+	if got == "" {
+		t.Fatal("expected a non-empty truncated result, got empty string")
+	}
+	if tok.CountTokens(got) > budget {
+		t.Errorf("truncated result has %d tokens, want <= %d", tok.CountTokens(got), budget)
+	}
+	if len(got) >= len(bigParagraph) {
+		t.Errorf("expected truncation to actually shorten the text")
+	}
+}

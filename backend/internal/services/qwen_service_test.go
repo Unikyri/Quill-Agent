@@ -351,6 +351,46 @@ func TestRequestsUseConfiguredModelsNotHardcodedLiterals(t *testing.T) {
 	})
 }
 
+// TestEmbeddingDimensionGuard verifies that a model returning a vector whose
+// length differs from the configured QWEN_EMBEDDING_DIMENSIONS is rejected
+// before it can be persisted into the hardcoded vector(1024) columns — a
+// wrong-dimension vector silently corrupts the vector space.
+func TestEmbeddingDimensionGuard(t *testing.T) {
+	// Server returns a 2-element embedding regardless of the requested size.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req EmbeddingRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode embedding request: %v", err)
+		}
+		if req.Dimensions != 4 {
+			t.Errorf("expected request to carry dimensions=4, got %d", req.Dimensions)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(EmbeddingResponse{Data: []struct {
+			Embedding []float32 `json:"embedding"`
+			Index     int       `json:"index"`
+		}{{Embedding: []float32{0.1, 0.2}, Index: 0}}})
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		QwenBaseURL:          server.URL,
+		QwenAPIKey:           "test-key",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
+		QwenEmbeddingModel:   "text-embedding-v4",
+		QwenEmbeddingDims:    4, // expect 4, server lies with 2
+	}
+	svc := NewQwenService(cfg, nil)
+
+	if _, err := svc.GenerateEmbedding(context.Background(), "text"); err == nil {
+		t.Error("GenerateEmbedding: expected a dimension-mismatch error, got nil")
+	}
+	if _, err := svc.GenerateEmbeddingBatch(context.Background(), []string{"text"}); err == nil {
+		t.Error("GenerateEmbeddingBatch: expected a dimension-mismatch error, got nil")
+	}
+}
+
 func TestNoHardcodedModelLiteralsOutsideConstructor(t *testing.T) {
 	root, err := filepath.Abs(".")
 	if err != nil {
