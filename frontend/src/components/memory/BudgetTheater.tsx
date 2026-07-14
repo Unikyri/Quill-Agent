@@ -19,7 +19,7 @@ export default function BudgetTheater({ budget, items }: BudgetTheaterProps) {
     return (
       <div className={styles.wrap}>
         <span className={styles.kicker}>Budget Theater</span>
-        <p className={styles.emptyPlaceholder}>No budget data yet — run a Fusion Explorer query to populate this</p>
+        <p className={styles.emptyPlaceholder}>Run a search above to see how the context budget is allocated</p>
       </div>
     )
   }
@@ -31,7 +31,10 @@ export default function BudgetTheater({ budget, items }: BudgetTheaterProps) {
     <div className={styles.wrap}>
       <div className={styles.header}>
         <span className={styles.kicker}>Budget Theater</span>
-        <span className={styles.usedPercent}>{budget.used_percent}% of window used</span>
+        <div className={styles.headerRight}>
+          <span className={styles.usedPercent}>{budget.used_percent}% of window used</span>
+          <p className={styles.hint}>Tokens reserved for response overhead</p>
+        </div>
       </div>
 
       <div className={styles.bars}>

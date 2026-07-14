@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -154,12 +155,14 @@ func parseDOCX(content []byte) (string, error) {
 	return strings.TrimSpace(buf.String()), nil
 }
 
-// parsePDF extracts plain text from a PDF using github.com/ledongthuc/pdf.
+// parsePDF extracts plain text from a PDF.
 //
-// recover() is mandatory: the underlying parser is known to panic on
-// malformed PDFs (see its many internal `panic(...)` calls in read.go/page.go).
-// A recovered panic is treated as a parse error so the ingestion job fails
-// cleanly instead of crashing the worker goroutine.
+// Primary method: github.com/ledongthuc/pdf (pure Go). Fallback: pdftotext
+// (poppler-utils) when the Go parser fails — catches PDFs with unusual headers
+// or encoding that the lightweight Go library rejects.
+//
+// recover() is mandatory: the Go parser panics on malformed PDFs. A recovered
+// panic falls through to pdftotext instead of failing the job.
 func parsePDF(content []byte) (text string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -168,19 +171,29 @@ func parsePDF(content []byte) (text string, err error) {
 		}
 	}()
 
-	reader, rerr := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
-	if rerr != nil {
-		return "", fmt.Errorf("PDF is encrypted or unreadable: %w", rerr)
+	// ponytail: Go parser first (fast, no subprocess), pdftotext fallback on
+	// any failure (catches the edge cases the Go parser can't handle).
+	if t, e := parsePDFWithGo(content); e == nil {
+		return t, nil
+	}
+	return parsePDFWithPdftotext(content)
+}
+
+// parsePDFWithGo uses the pure-Go ledongthuc/pdf library.
+func parsePDFWithGo(content []byte) (string, error) {
+	reader, err := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return "", fmt.Errorf("PDF is encrypted or unreadable: %w", err)
 	}
 
-	plain, rerr := reader.GetPlainText()
-	if rerr != nil {
-		return "", fmt.Errorf("extract PDF text: %w", rerr)
+	plain, err := reader.GetPlainText()
+	if err != nil {
+		return "", fmt.Errorf("extract PDF text: %w", err)
 	}
 
-	b, rerr := io.ReadAll(plain)
-	if rerr != nil {
-		return "", fmt.Errorf("read extracted PDF text: %w", rerr)
+	b, err := io.ReadAll(plain)
+	if err != nil {
+		return "", fmt.Errorf("read extracted PDF text: %w", err)
 	}
 
 	extracted := strings.TrimSpace(string(b))
@@ -188,5 +201,23 @@ func parsePDF(content []byte) (text string, err error) {
 		return "", fmt.Errorf("no extractable text — scanned or image-only PDF? OCR is not supported")
 	}
 
+	return extracted, nil
+}
+
+// parsePDFWithPdftotext uses the system pdftotext command (poppler-utils).
+// Falls back gracefully when pdftotext is not installed.
+func parsePDFWithPdftotext(content []byte) (string, error) {
+	cmd := exec.Command("pdftotext", "-", "-")
+	cmd.Stdin = bytes.NewReader(content)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("pdftotext failed: %w", err)
+	}
+	extracted := strings.TrimSpace(string(out))
+	if extracted == "" {
+		// ponytail: same message as the Go parser — the caller doesn't need to
+		// know which backend was tried. A scan-only PDF fails the same way.
+		return "", fmt.Errorf("no extractable text — scanned or image-only PDF? OCR is not supported")
+	}
 	return extracted, nil
 }

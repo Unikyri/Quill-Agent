@@ -316,3 +316,46 @@ func TestEntityRepoTouchBatchEmpty(t *testing.T) {
 		t.Fatalf("TouchBatch empty: %v", err)
 	}
 }
+
+// TestFindByFuzzyName matches substring containment in either direction.
+func TestFindByFuzzyName(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "005")
+	universe := setupEntityRepoFixtures(t, pool)
+
+	ctx := context.Background()
+	repo := NewEntityRepo(pool)
+
+	existing := createTestEntity(t, pool, universe.ID, "James Holden", 0.8, "active")
+
+	cases := []struct {
+		name      string
+		query     string
+		entityType string
+		wantID    uuid.UUID
+		wantErr   bool
+	}{
+		{"shorter query matches longer stored name", "Holden", "character", existing.ID, false},
+		{"longer query matches shorter stored name", "James Holden", "character", existing.ID, false},
+		{"no match returns error", "Naomi Nagata", "character", uuid.Nil, true},
+		{"type mismatch returns error", "Holden", "location", uuid.Nil, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := repo.FindByFuzzyName(ctx, universe.ID, tc.query, tc.entityType)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got entity %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("FindByFuzzyName: %v", err)
+			}
+			if got.ID != tc.wantID {
+				t.Errorf("FindByFuzzyName returned %v, want %v", got.ID, tc.wantID)
+			}
+		})
+	}
+}

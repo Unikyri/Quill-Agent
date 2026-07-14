@@ -73,11 +73,11 @@ func Load() (*Config, error) {
 		PlotHoleChapters:          getEnvInt("PLOT_HOLE_CHAPTERS", 8),
 		MaxContradictionCandidates: getEnvInt("MAX_CONTRADICTION_CANDIDATES", 3),
 		WSEnabled:                 getEnvBool("QUILL_WS_ENABLED", true),
-		MaxContextTokens:          getEnvInt("QWEN_MAX_CONTEXT_TOKENS", 30000),
+		MaxContextTokens:          getEnvInt("QWEN_MAX_CONTEXT_TOKENS", 50000),
 		ResponseReserve:           getEnvInt("QWEN_RESPONSE_RESERVE", 2000),
 		ContradictionAgentDepth:   getEnvInt("CONTRADICTION_AGENT_DEPTH", 3),
 		PlotHoleAgentDepth:        getEnvInt("PLOT_HOLE_AGENT_DEPTH", 2),
-		IngestAnalysisMaxChapters: getEnvInt("INGEST_ANALYSIS_MAX_CHAPTERS", 8),
+		IngestAnalysisMaxChapters: getEnvInt("INGEST_ANALYSIS_MAX_CHAPTERS", 25),
 	}
 
 	if cfg.QwenAPIKey == "" {

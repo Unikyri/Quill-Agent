@@ -431,10 +431,12 @@ type headingMatch struct {
 // <= maxSaneHeadingMatches) wins. Each has exactly one capture group holding
 // the extracted title text.
 var headingPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?m)^#{1,3} (.+)$`),                                    // markdown (also styled DOCX via D1 bonus)
-	regexp.MustCompile(`(?mi)^[ \t]*(chapter[ \t]+(?:\d+|[ivxlc]+)\b.*)$`),     // English
-	regexp.MustCompile(`(?mi)^[ \t]*(cap[ií]tulo[ \t]+(?:\d+|[ivxlc]+)\b.*)$`), // Spanish
-	regexp.MustCompile(`(?m)^[ \t]*([IVXLC]{1,7}\.?)[ \t]*$`),                  // bare roman numeral
+	regexp.MustCompile(`(?m)^#{1,3} (.+)$`), // markdown (also styled DOCX via D1 bonus)
+	// ponytail: spelled-out numbers (one, two, three…) added because books like The Expanse use "Chapter One" not "Chapter 1"
+	regexp.MustCompile(`(?mi)^[ \t]*(chapter[ \t]+(?:\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)\b.*)$`),      // English
+	regexp.MustCompile(`(?mi)^[ \t]*(cap[ií]tulo[ \t]+(?:\d+|[ivxlc]+|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieciséis|diecisiete|dieciocho|diecinueve|veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien)\b.*)$`), // Spanish
+	regexp.MustCompile(`(?m)^[ \t]*([IVXLC]{1,7}\.?)[ \t]*$`),                                         // bare roman numeral
+	regexp.MustCompile(`(?m)^[ \t]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)[ \t]*$`),                           // title case heading ("Holden", "The Rocinante")
 }
 
 // regexHeadingMatches runs re against content and returns one headingMatch
@@ -455,8 +457,15 @@ func regexHeadingMatches(content string, re *regexp.Regexp) []headingMatch {
 // isAllCapsHeadingLine reports whether a trimmed line looks like an
 // ALL-CAPS chapter heading: short (<= 60 chars), no lowercase letters, and
 // at least 3 letters (so pure punctuation/numeral lines don't qualify).
+//
+// ponytail: 10-char minimum plus rejection of sentence-ending punctuation
+// prevents PDF artifacts like "JIM" or "THE END." from becoming fake chapters.
 func isAllCapsHeadingLine(line string) bool {
-	if line == "" || len(line) > 60 {
+	if len(line) < 10 || len(line) > 60 {
+		return false
+	}
+	last := line[len(line)-1]
+	if last == '.' || last == '!' || last == '?' || last == '"' || last == '»' || last == ',' || last == ';' || last == ':' {
 		return false
 	}
 	letters := 0

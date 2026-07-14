@@ -117,6 +117,55 @@ describe('IngestPage', () => {
     })
   })
 
+  it('displays the backend error message for a failed job', async () => {
+    mockListIngestionJobs.mockResolvedValue({
+      jobs: [
+        {
+          id: 'job-fail',
+          universe_id: 'uni-1',
+          work_id: 'work-1',
+          filename: 'broken.md',
+          status: 'failed',
+          error_message: 'document contains no text',
+          total_chapters_detected: 0,
+          chapters_processed: 0,
+          entities_extracted: 0,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed')).toBeInTheDocument()
+      expect(screen.getByText('document contains no text')).toBeInTheDocument()
+    })
+  })
+
+  it('does not render an error line when a failed job has no error message', async () => {
+    mockListIngestionJobs.mockResolvedValue({
+      jobs: [
+        {
+          id: 'job-fail',
+          universe_id: 'uni-1',
+          work_id: 'work-1',
+          filename: 'broken.md',
+          status: 'failed',
+          total_chapters_detected: 0,
+          chapters_processed: 0,
+          entities_extracted: 0,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/document contains no text/)).not.toBeInTheDocument()
+  })
+
   it('shows the existing job instead of a new card on a duplicate upload', async () => {
     mockIngestDocument.mockResolvedValue({ job_id: 'job-9', status: 'duplicate' })
     renderPage()

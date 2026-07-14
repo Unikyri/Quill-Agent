@@ -537,10 +537,22 @@ func TestSplitChunksCascade(t *testing.T) {
 			wantContains: "Chapter 1",
 		},
 		{
+			name:         "english chapter spelled out",
+			content:      "Chapter One\n\nBody one.\n\nChapter Two\n\nBody two.",
+			minChunks:    2,
+			wantContains: "Chapter One",
+		},
+		{
 			name:         "spanish capitulo",
 			content:      "Capítulo I\n\nCuerpo uno.\n\nCapítulo II\n\nCuerpo dos.",
 			minChunks:    2,
 			wantContains: "Capítulo I",
+		},
+		{
+			name:         "spanish capitulo spelled out",
+			content:      "Capítulo Uno\n\nCuerpo uno.\n\nCapítulo Dos\n\nCuerpo dos.",
+			minChunks:    2,
+			wantContains: "Capítulo Uno",
 		},
 		{
 			name:         "bare roman numerals",
@@ -550,9 +562,21 @@ func TestSplitChunksCascade(t *testing.T) {
 		},
 		{
 			name:         "all caps headings",
-			content:      "THE BEGINNING\n\nBody one.\n\nTHE END\n\nBody two.",
+			content:      "CHAPTER ONE: THE BEGINNING\n\nBody one.\n\nCHAPTER TWO: THE END\n\nBody two.",
 			minChunks:    2,
-			wantContains: "THE BEGINNING",
+			wantContains: "CHAPTER ONE: THE BEGINNING",
+		},
+		{
+			name:         "title case single word",
+			content:      "Holden\n\nBody one.\n\nMiller\n\nBody two.",
+			minChunks:    2,
+			wantContains: "Holden",
+		},
+		{
+			name:         "title case multi-word",
+			content:      "The Rocinante\n\nBody one.\n\nThe Canterbury\n\nBody two.",
+			minChunks:    2,
+			wantContains: "The Rocinante",
 		},
 		{
 			name:         "no pattern falls back to paragraphs",
@@ -580,6 +604,33 @@ func TestSplitChunksCascade(t *testing.T) {
 					titles[i] = ch.title
 				}
 				t.Errorf("expected a chunk titled %q, got titles: %v", tc.wantContains, titles)
+			}
+		})
+	}
+}
+
+// TestIsAllCapsHeadingLine verifies the ALL-CAPS fallback heuristic.
+func TestIsAllCapsHeadingLine(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"CHAPTER ONE: THE BEGINNING", true},
+		{"THE BEGINNING", true}, // 13 chars, no punctuation
+		{"A", false},            // too short
+		{"THE END.", false},     // sentence punctuation
+		{"WHAT?", false},        // sentence punctuation
+		{"LOOK!", false},        // sentence punctuation
+		{"QUOTE,", false},       // sentence punctuation
+		{"SEMICOLON;", false},   // sentence punctuation
+		{"COLON:", false},       // sentence punctuation
+		{"DIALOGUE", false},     // no punctuation, but only 8 chars (< 10)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.line, func(t *testing.T) {
+			if got := isAllCapsHeadingLine(tc.line); got != tc.want {
+				t.Errorf("isAllCapsHeadingLine(%q) = %v, want %v", tc.line, got, tc.want)
 			}
 		})
 	}

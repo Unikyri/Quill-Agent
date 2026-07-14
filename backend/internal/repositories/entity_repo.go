@@ -96,6 +96,32 @@ func (r *EntityRepo) FindByAlias(ctx context.Context, universeID uuid.UUID, alia
 	return e, nil
 }
 
+func (r *EntityRepo) FindByFuzzyName(ctx context.Context, universeID uuid.UUID, name string, entityType string) (*models.Entity, error) {
+	query := `
+		SELECT id, universe_id, type, name, aliases, description, properties, status, relevance_score,
+		       last_mentioned_chapter_id, last_mentioned_at, created_at, updated_at
+		FROM entities
+		WHERE universe_id = $1
+		  AND type = $3
+		  AND (LOWER(name) LIKE '%' || LOWER($2) || '%' OR LOWER($2) LIKE '%' || LOWER(name) || '%')
+		ORDER BY LENGTH(name) DESC
+		LIMIT 1
+	`
+	e := &models.Entity{}
+	err := r.pool.QueryRow(ctx, query, universeID, name, entityType).Scan(
+		&e.ID, &e.UniverseID, &e.Type, &e.Name, &e.Aliases, &e.Description,
+		&e.Properties, &e.Status, &e.RelevanceScore, &e.LastMentionedChapterID,
+		&e.LastMentionedAt, &e.CreatedAt, &e.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("entity not found by fuzzy name")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find entity by fuzzy name: %w", err)
+	}
+	return e, nil
+}
+
 type EntityFilters struct {
 	Type         string
 	Status       string

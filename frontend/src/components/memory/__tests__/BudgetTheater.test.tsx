@@ -33,6 +33,6 @@ describe('BudgetTheater', () => {
 
   it('renders an empty state without crashing when budget is null', () => {
     render(<BudgetTheater budget={null} items={[]} />)
-    expect(screen.getByText(/no budget data yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/run a search above/i)).toBeInTheDocument()
   })
 })

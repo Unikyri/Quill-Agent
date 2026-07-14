@@ -49,7 +49,7 @@ export default function FusionExplorer({ universeId, onResult }: FusionExplorerP
             className={styles.input}
             type="text"
             value={query}
-            placeholder="Search memory…"
+            placeholder="Search characters, places, events…"
             onChange={(e) => setQuery(e.target.value)}
           />
           <button className={styles.explainBtn} onClick={handleExplain} disabled={loading}>
@@ -60,6 +60,12 @@ export default function FusionExplorer({ universeId, onResult }: FusionExplorerP
 
       {loading && <p className={styles.status}>Explaining…</p>}
       {error && <p className={styles.statusError}>{error}</p>}
+
+      {!result && !loading && !error && (
+        <p className={styles.hint}>
+          Type a query above and click Explain to see how memories are fused from different sources
+        </p>
+      )}
 
       {result && !loading && !error && (
         <>

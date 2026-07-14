@@ -13,6 +13,7 @@ interface IngestJob {
   status?: string
   processed?: number
   total?: number
+  errorMessage?: string
 }
 
 // ponytail: fixed step labels mirroring the backend pipeline order
@@ -61,6 +62,7 @@ export default function IngestPage() {
             status: j.status,
             processed: j.chapters_processed,
             total: j.total_chapters_detected,
+            errorMessage: j.error_message,
           }))
           const fetchedIds = new Set(fetched.map((j) => j.jobId))
           return [...prev.filter((j) => !fetchedIds.has(j.jobId)), ...fetched]
@@ -154,6 +156,9 @@ export default function IngestPage() {
                   <span className={styles.jobStatus} data-done={done || undefined}>
                     {done ? 'Completed' : failed ? 'Failed' : status === 'running' || progress ? 'Processing…' : 'Queued'}
                   </span>
+                  {failed && job.errorMessage && (
+                    <p className={styles.errorText}>{job.errorMessage}</p>
+                  )}
                   {!done && !failed && (
                     <button type="button" className={styles.checkStatusBtn} onClick={handleCheckStatus}>
                       Check status

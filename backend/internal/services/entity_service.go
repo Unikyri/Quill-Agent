@@ -111,6 +111,20 @@ func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUI
 		return merged, prevStatus, false, nil
 	}
 
+	// Step 1.5: Fuzzy name match (substring containment)
+	existing, err = s.entityRepo.FindByFuzzyName(ctx, universeID, data.Name, data.Type)
+	if err == nil && existing != nil {
+		prevStatus := existing.Status
+		merged := s.mergeEntity(existing, data)
+		if err := s.entityRepo.Update(ctx, tx, merged); err != nil {
+			return nil, "", false, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, "", false, err
+		}
+		return merged, prevStatus, false, nil
+	}
+
 	// Step 2: Alias match
 	for _, alias := range data.Aliases {
 		existing, err = s.entityRepo.FindByAlias(ctx, universeID, alias)
