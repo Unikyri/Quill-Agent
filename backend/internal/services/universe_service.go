@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,40 +15,19 @@ import (
 )
 
 var (
-	allowedGenres = map[string]struct{}{
-		"sci-fi":      {},
-		"fantasy":     {},
-		"mystery":     {},
-		"romance":     {},
-		"horror":      {},
-		"non-fiction": {},
-		"thriller":    {},
-		"historical":  {},
-		"adventure":   {},
-		"comedy":      {},
-		"drama":       {},
-	}
-
-	allowedFormats = map[string]struct{}{
-		"novel":         {},
-		"short-story":   {},
-		"screenplay":    {},
-		"poetry":        {},
-		"essay":         {},
-		"article":       {},
-		"graphic-novel": {},
+	allowedGenreTags = map[string]struct{}{
+		"fantasy": {}, "epic-fantasy": {}, "urban-fantasy": {}, "romantasy": {},
+		"science-fiction": {}, "space-opera": {}, "dystopian": {}, "horror": {},
+		"gothic": {}, "paranormal": {}, "romance": {}, "mystery": {},
+		"cozy-mystery": {}, "thriller": {}, "crime": {}, "historical": {},
+		"literary": {}, "adventure": {}, "young-adult": {}, "coming-of-age": {},
 	}
 )
 
 func validateUniverseEnums(input models.CreateUniverseRequest) error {
-	if input.Genre != "" {
-		if _, ok := allowedGenres[input.Genre]; !ok {
-			return fmt.Errorf("invalid genre %q: must be one of %s", input.Genre, joinKeys(allowedGenres))
-		}
-	}
-	if input.Format != "" {
-		if _, ok := allowedFormats[input.Format]; !ok {
-			return fmt.Errorf("invalid format %q: must be one of %s", input.Format, joinKeys(allowedFormats))
+	for _, tag := range input.GenreTags {
+		if _, ok := allowedGenreTags[tag]; !ok {
+			return fmt.Errorf("invalid genre tag %q: must be one of %s", tag, joinKeys(allowedGenreTags))
 		}
 	}
 	return nil
@@ -58,6 +38,7 @@ func joinKeys(m map[string]struct{}) string {
 	for k := range m {
 		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 	return strings.Join(keys, ", ")
 }
 
@@ -79,9 +60,6 @@ func (s *UniverseService) Create(ctx context.Context, userID uuid.UUID, input mo
 	if input.Name == "" {
 		return nil, fmt.Errorf("universe name is required")
 	}
-	if input.Format == "" {
-		return nil, fmt.Errorf("universe format is required")
-	}
 	if err := validateUniverseEnums(input); err != nil {
 		return nil, err
 	}
@@ -97,8 +75,7 @@ func (s *UniverseService) Create(ctx context.Context, userID uuid.UUID, input mo
 		UserID:      userID,
 		Name:        input.Name,
 		Description: input.Description,
-		Genre:       input.Genre,
-		Format:      input.Format,
+		GenreTags:   input.GenreTags,
 	}
 
 	if err := s.universeRepo.Create(ctx, tx, u); err != nil {
@@ -156,11 +133,8 @@ func (s *UniverseService) Update(ctx context.Context, id uuid.UUID, input models
 	if input.Description != "" {
 		u.Description = input.Description
 	}
-	if input.Genre != "" {
-		u.Genre = input.Genre
-	}
-	if input.Format != "" {
-		u.Format = input.Format
+	if input.GenreTags != nil {
+		u.GenreTags = input.GenreTags
 	}
 
 	if err := s.universeRepo.Update(ctx, tx, u); err != nil {

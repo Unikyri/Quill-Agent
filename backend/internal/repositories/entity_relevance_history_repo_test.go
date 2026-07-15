@@ -16,7 +16,7 @@ func setupHistoryFixtures(t *testing.T, pool *pgxpool.Pool) models.Universe {
 	t.Helper()
 	ctx := context.Background()
 	user := createTestUser(t, ctx, pool)
-	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "History Test Universe", Format: "novel"}
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "History Test Universe", GenreTags: []string{"fantasy"}}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -25,7 +25,7 @@ func setupHistoryFixtures(t *testing.T, pool *pgxpool.Pool) models.Universe {
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, "INSERT INTO universes (id, user_id, name, format) VALUES ($1,$2,$3,$4)",
-		universe.ID, universe.UserID, universe.Name, universe.Format); err != nil {
+		universe.ID, universe.UserID, universe.Name, "novel"); err != nil {
 		t.Fatalf("insert universe: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

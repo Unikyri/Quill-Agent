@@ -17,8 +17,8 @@ Unchanged from v1 and assumed by everything below:
 - **Layering:** `repositories/*_repo.go` (pgx SQL) → `services/*_service.go` (logic) →
   `handlers/*.go` (Fiber). Cross-domain reads go through `MemoryService`.
 - **Migrations:** sequentially numbered `.up.sql`/`.down.sql` pairs in `backend/migrations/`,
-  applied by `backend/scripts/run-migrations.sh`. Highest existing: **019**. New migrations in
-  this release begin at **020**.
+  applied by `backend/scripts/run-migrations.sh`. Migration **020** already exists for
+  ingestion content hashes; new v2 migrations begin at **021**.
 - **AGE graph:** one graph per universe (`universe_<uuid>`). All AGE access **MUST** route
   through `withAgeTx` / `withAgeConn` (search_path restoration). Identifiers from LLM output
   **MUST** pass `validCypherIdentifier`.
@@ -33,7 +33,7 @@ Until the front can faithfully display what the backend produced, end-to-end obs
 are untrustworthy — a "broken analysis" report may be a broken *display*. Fix the ruler
 before measuring.
 
-### 2.1 Taxonomy migration (TX) — migration `020`
+### 2.1 Taxonomy migration (TX) — migration `021`
 
 | ID | Priority | Requirement |
 |---|---|---|
@@ -41,13 +41,13 @@ before measuring.
 | **TX-2** | P0 | The genre vocabulary **MUST** be closed and server-validated. Rejected values return `VALIDATION_ERROR`. The LLM **MUST NOT** be able to introduce a genre tag. |
 | **TX-3** | P0 | `Universe.Format` **MUST** be removed. Format moves to `Work.Type`. |
 | **TX-4** | P0 | `Work.Type` **MUST** be validated against the closed set `{novel, novella, short-story}`. It is currently an unvalidated free string. |
-| **TX-5** | P0 | The `020` migration **MUST** carry a data migration: existing `Universe.Genre` → single-element `GenreTags`; existing `Universe.Format` → `Work.Type` for that universe's works, defaulting to `novel`. |
-| **TX-6** | P0 | `020.down.sql` **MUST** restore the prior shape (first tag wins). |
+| **TX-5** | P0 | The `021` migration **MUST** carry a data migration: existing `Universe.Genre` → single-element `GenreTags`; existing `Universe.Format` → `Work.Type` for that universe's works, defaulting to `novel`. |
+| **TX-6** | P0 | `021_taxonomy.down.sql` **MUST** restore the prior shape (first tag wins). |
 | **TX-7** | P0 | Frontend: genre becomes a **multi-select** on universe create/edit; format becomes a **single select** on work create/edit. |
 
 Removed formats: `screenplay`, `graphic-novel`, `poetry`, `essay`, `article` (PRD §2.2).
 
-### 2.2 Entity taxonomy (ET) — migration `020`
+### 2.2 Entity taxonomy (ET) — migration `021`
 
 Current state, verified:
 
@@ -76,7 +76,7 @@ Current state, verified:
 | ID | Priority | Requirement |
 |---|---|---|
 | **ET-1** | P0 | The 7-type vocabulary above is **canonical and closed**. Every layer that names entity types **MUST** derive from it; no layer may carry its own divergent list. |
-| **ET-2** | P0 | Migration `020` **MUST** add a `CHECK` constraint on `entities.type` restricted to the canonical set, with a data migration mapping any non-canonical existing values to the nearest canonical type. |
+| **ET-2** | P0 | Migration `021` **MUST** add a `CHECK` constraint on `entities.type` restricted to the canonical set, with a data migration mapping any non-canonical existing values to the nearest canonical type. |
 | **ET-3** | P0 | The extraction prompt **MUST** request `object` as a category, and **MUST** embed the identification criteria above so the model classifies by criterion, not intuition. When structured output lands (SO-1), the JSON Schema `enum` **MUST** carry exactly these 7 values. |
 | **ET-4** | P0 | The frontend **MUST** have **one** module exporting the canonical list plus per-type display metadata (label, colour, glyph). `TYPE_FILTERS` (`EntitiesPage.tsx:22`) and `ENTITY_TYPES` (`graphParse.ts:24`) **MUST** be replaced by imports from it. |
 | **ET-5** | P0 | `event` entities **MUST** continue feeding the timeline. Being an entity and appearing on the timeline are not exclusive — the timeline is a *view over* event entities, not a separate store. |
@@ -149,7 +149,7 @@ The chain exists and is wired. It does not work. **Diagnosis precedes any rewrit
 | **IG-2** | P1 | **MAP** — per-chunk extraction of entity **mentions**. It **MUST** be stateless: no database writes, no entity resolution, no reads of prior chunks' results. It **MAY** run with bounded concurrency. |
 | **IG-3** | P1 | **REDUCE** — resolution of mentions to entities (exact match → alias → fuzzy → semantic → create). It **MUST** execute single-threaded per universe. |
 | **IG-4** | P1 | `EntityService.ResolveOrCreate` **MUST NOT** be called concurrently for the same universe. The observed "James" / "James Holden" duplication is a **write-write race**: concurrent resolvers cannot see each other's uncommitted writes and both create. Serialising REDUCE is the fix. |
-| **IG-5** | P1 | As defence in depth, a **unique constraint** on the entity natural key **SHOULD** exist (migration `021`) so that a future concurrency bug fails loudly rather than duplicating silently. |
+| **IG-5** | P1 | As defence in depth, a **unique constraint** on the entity natural key **SHOULD** exist (migration `022`) so that a future concurrency bug fails loudly rather than duplicating silently. |
 
 ### 4.2 Throughput governance (TH)
 
@@ -240,7 +240,7 @@ The chain exists and is wired. It does not work. **Diagnosis precedes any rewrit
 
 ## 6. P2 — Writer Memory
 
-### 6.1 Data model — migration `022`
+### 6.1 Data model — migration `023`
 
 Two tables. The split is load-bearing (PRD §5.1).
 
@@ -345,7 +345,7 @@ Two tables. The split is load-bearing (PRD §5.1).
 
 | ID | Priority | Requirement |
 |---|---|---|
-| **SS-1** | P2 | Skills are activated at the **universe** level. Migration `023` adds the universe↔skill association. |
+| **SS-1** | P2 | Skills are activated at the **universe** level. Migration `024` adds the universe↔skill association. |
 | **SS-2** | P2 | On universe creation, the system **SHOULD** pre-suggest skills whose `genre_tags` intersect the universe's genre tags. |
 | **SS-3** | P2 | When a craft review is requested, the **agent MUST select** which of the active skills apply to the passage, by reasoning over the `description` fields alone. |
 | **SS-4** | P2 | Selection **MUST** use **progressive disclosure**: only the `description` lines enter the selection prompt; only the selected skill's **full body** is then loaded into the review prompt. This is the token optimisation; loading every active skill body would defeat it. |

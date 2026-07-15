@@ -105,9 +105,9 @@ type QwenToolFunction struct {
 
 // QwenToolCall represents a tool call requested by the model in a response.
 type QwenToolCall struct {
-	ID       string                   `json:"id"`
-	Type     string                   `json:"type"`
-	Function QwenToolCallFunction     `json:"function"`
+	ID       string               `json:"id"`
+	Type     string               `json:"type"`
+	Function QwenToolCallFunction `json:"function"`
 }
 
 // QwenToolCallFunction holds the function name and JSON-encoded arguments
@@ -240,10 +240,27 @@ type ExtractedEntity struct {
 type ExtractedEntities struct {
 	Characters       []ExtractedEntity `json:"characters"`
 	Places           []ExtractedEntity `json:"places"`
+	Objects          []ExtractedEntity `json:"objects"`
 	Events           []ExtractedEntity `json:"events"`
 	Factions         []ExtractedEntity `json:"factions"`
 	WorldRules       []ExtractedEntity `json:"world_rules"`
 	PlotDevelopments []ExtractedEntity `json:"plot_developments"`
+}
+
+func (e *ExtractedEntities) All() []ExtractedEntity {
+	if e == nil {
+		return nil
+	}
+
+	all := make([]ExtractedEntity, 0, len(e.Characters)+len(e.Places)+len(e.Objects)+len(e.Events)+len(e.Factions)+len(e.WorldRules)+len(e.PlotDevelopments))
+	all = append(all, e.Characters...)
+	all = append(all, e.Places...)
+	all = append(all, e.Objects...)
+	all = append(all, e.Events...)
+	all = append(all, e.Factions...)
+	all = append(all, e.WorldRules...)
+	all = append(all, e.PlotDevelopments...)
+	return all
 }
 
 // Chat sends a raw chat completion request and returns the response content.
@@ -282,10 +299,21 @@ Respond with ONLY valid JSON in this format:
 {
   "characters": [{"name": "...", "aliases": [], "type": "character", "status": "active", "description": "...", "properties": {}}],
   "places": [{"name": "...", "type": "place", "description": "...", "properties": {}}],
+  "objects": [{"name": "...", "type": "object", "description": "...", "properties": {}}],
   "events": [{"name": "...", "type": "event", "description": "...", "properties": {}}],
   "factions": [{"name": "...", "type": "faction", "description": "...", "properties": {}}],
   "world_rules": [{"name": "...", "type": "world_rule", "description": "...", "properties": {}}],
   "plot_developments": [{"name": "...", "type": "plot_arc", "description": "...", "properties": {}}]
+}
+
+Classify against these criteria:
+- character: an agent with its own will that acts in the story; if it decides, it is a character.
+- place: a location where scenes occur or that is referenced spatially.
+- object: a named thing with no will of its own, such as a sword or ship; a pilot is a character, but the ship is an object.
+- faction: a group with a collective identity, such as a government, guild, crew, family, or order.
+- event: a named occurrence with a temporal location, such as a war, wedding, or catastrophe.
+- world_rule: a law of the universe, such as a magic-system constraint, physics rule, or established social norm.
+- plot_arc: a narrative thread that spans chapters and is tracked for continuity.
 }`, universeContext, text)
 
 	payload := QwenRequest{

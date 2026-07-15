@@ -435,8 +435,8 @@ var headingPatterns = []*regexp.Regexp{
 	// ponytail: spelled-out numbers (one, two, three…) added because books like The Expanse use "Chapter One" not "Chapter 1"
 	regexp.MustCompile(`(?mi)^[ \t]*(chapter[ \t]+(?:\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)\b.*)$`),      // English
 	regexp.MustCompile(`(?mi)^[ \t]*(cap[ií]tulo[ \t]+(?:\d+|[ivxlc]+|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieciséis|diecisiete|dieciocho|diecinueve|veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien)\b.*)$`), // Spanish
-	regexp.MustCompile(`(?m)^[ \t]*([IVXLC]{1,7}\.?)[ \t]*$`),                                         // bare roman numeral
-	regexp.MustCompile(`(?m)^[ \t]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)[ \t]*$`),                           // title case heading ("Holden", "The Rocinante")
+	regexp.MustCompile(`(?m)^[ \t]*([IVXLC]{1,7}\.?)[ \t]*$`),                // bare roman numeral
+	regexp.MustCompile(`(?m)^[ \t]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)[ \t]*$`), // title case heading ("Holden", "The Rocinante")
 }
 
 // regexHeadingMatches runs re against content and returns one headingMatch
@@ -606,38 +606,8 @@ func (s *IngestionService) resolveAndBuildGraph(ctx context.Context, universeID 
 		return 0, nil
 	}
 
-	allEntities := make([]repositories.ExtractedEntity, 0)
-	for _, e := range extracted.Characters {
-		allEntities = append(allEntities, repositories.ExtractedEntity{
-			Type: e.Type, Name: e.Name, Aliases: e.Aliases,
-			Description: e.Description, Status: e.Status, Properties: e.Properties,
-		})
-	}
-	for _, e := range extracted.Places {
-		allEntities = append(allEntities, repositories.ExtractedEntity{
-			Type: e.Type, Name: e.Name, Aliases: e.Aliases,
-			Description: e.Description, Status: e.Status, Properties: e.Properties,
-		})
-	}
-	for _, e := range extracted.Events {
-		allEntities = append(allEntities, repositories.ExtractedEntity{
-			Type: e.Type, Name: e.Name, Aliases: e.Aliases,
-			Description: e.Description, Status: e.Status, Properties: e.Properties,
-		})
-	}
-	for _, e := range extracted.Factions {
-		allEntities = append(allEntities, repositories.ExtractedEntity{
-			Type: e.Type, Name: e.Name, Aliases: e.Aliases,
-			Description: e.Description, Status: e.Status, Properties: e.Properties,
-		})
-	}
-	for _, e := range extracted.WorldRules {
-		allEntities = append(allEntities, repositories.ExtractedEntity{
-			Type: e.Type, Name: e.Name, Aliases: e.Aliases,
-			Description: e.Description, Status: e.Status, Properties: e.Properties,
-		})
-	}
-	for _, e := range extracted.PlotDevelopments {
+	allEntities := make([]repositories.ExtractedEntity, 0, len(extracted.All()))
+	for _, e := range extracted.All() {
 		allEntities = append(allEntities, repositories.ExtractedEntity{
 			Type: e.Type, Name: e.Name, Aliases: e.Aliases,
 			Description: e.Description, Status: e.Status, Properties: e.Properties,

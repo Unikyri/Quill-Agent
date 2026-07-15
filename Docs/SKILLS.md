@@ -316,7 +316,7 @@ adjusts. They should never face a blank list of fifteen and be asked to guess.
 
 | Artefact | Status |
 |---|---|
-| Genre vocabulary (20 tags) | **Defined** — ready to implement (migration `020`) |
+| Genre vocabulary (20 tags) | **Defined** — ready to implement (migration `021`) |
 | Skill frontmatter (`name`, `description`, `genre_tags`, `stage`) for all 15 | **Defined** — this document |
 | Skill instruction bodies | **To be authored during implementation** |
 | `genre-conventions` reference files (20) | **To be authored during implementation** |

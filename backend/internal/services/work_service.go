@@ -11,6 +11,17 @@ import (
 	"github.com/quill/backend/internal/repositories"
 )
 
+var allowedWorkTypes = map[string]struct{}{
+	"novel": {}, "novella": {}, "short-story": {},
+}
+
+func validateWorkType(workType string) error {
+	if _, ok := allowedWorkTypes[workType]; !ok {
+		return fmt.Errorf("invalid work type %q: must be one of %s", workType, joinKeys(allowedWorkTypes))
+	}
+	return nil
+}
+
 type WorkService struct {
 	pool     *pgxpool.Pool
 	workRepo *repositories.WorkRepo
@@ -28,7 +39,10 @@ func (s *WorkService) Create(ctx context.Context, universeID uuid.UUID, input mo
 		return nil, fmt.Errorf("work title is required")
 	}
 	if input.Type == "" {
-		return nil, fmt.Errorf("work type is required")
+		input.Type = "novel"
+	}
+	if err := validateWorkType(input.Type); err != nil {
+		return nil, err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -87,6 +101,9 @@ func (s *WorkService) Update(ctx context.Context, id uuid.UUID, input models.Cre
 		w.Title = input.Title
 	}
 	if input.Type != "" {
+		if err := validateWorkType(input.Type); err != nil {
+			return nil, err
+		}
 		w.Type = input.Type
 	}
 	if input.Synopsis != "" {

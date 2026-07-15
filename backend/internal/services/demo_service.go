@@ -50,8 +50,8 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 	// Clone the universe
 	newID := uuid.New().String()
 	_, err = tx.Exec(ctx, `
-		INSERT INTO universes (id, user_id, name, description, genre, format, session_id, is_demo_template, created_at, updated_at)
-		SELECT $1, user_id, name, description, genre, format, $2, FALSE, NOW(), NOW()
+		INSERT INTO universes (id, user_id, name, description, genre_tags, session_id, is_demo_template, created_at, updated_at)
+		SELECT $1, user_id, name, description, genre_tags, $2, FALSE, NOW(), NOW()
 		FROM universes WHERE id = $3
 	`, newID, sessionID, templateID)
 	if err != nil {
@@ -60,9 +60,9 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 
 	// ── Deep-copy all dependent tables ──
 
-	workMap := make(map[string]string)     // oldWorkID → newWorkID
-	chapterMap := make(map[string]string)  // oldChapterID → newChapterID
-	entityMap := make(map[string]string)   // oldEntityID → newEntityID
+	workMap := make(map[string]string)    // oldWorkID → newWorkID
+	chapterMap := make(map[string]string) // oldChapterID → newChapterID
+	entityMap := make(map[string]string)  // oldEntityID → newEntityID
 
 	// 1. Works
 	workRows, err := tx.Query(ctx, `SELECT id, title, type, order_index, synopsis, status FROM works WHERE universe_id = $1`, templateID)
@@ -201,14 +201,14 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 	}
 	var mentions []struct {
 		oldID, oldEntityID, oldChapterID, snippet, mtype string
-		nodeID                                            *string
-		pIdx                                              int
+		nodeID                                           *string
+		pIdx                                             int
 	}
 	for mentionRows.Next() {
 		var item struct {
 			oldID, oldEntityID, oldChapterID, snippet, mtype string
-			nodeID                                            *string
-			pIdx                                              int
+			nodeID                                           *string
+			pIdx                                             int
 		}
 		if err := mentionRows.Scan(&item.oldID, &item.oldEntityID, &item.oldChapterID, &item.pIdx, &item.nodeID, &item.snippet, &item.mtype); err != nil {
 			mentionRows.Close()
@@ -325,12 +325,12 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 	}
 	var contradictions []struct {
 		oldID, severity, desc, suggestion, evidenceA, evidenceB, fingerprint, status string
-		oldEntityID, evAChID, evBChID                                               *string
+		oldEntityID, evAChID, evBChID                                                *string
 	}
 	for contraRows.Next() {
 		var item struct {
 			oldID, severity, desc, suggestion, evidenceA, evidenceB, fingerprint, status string
-			oldEntityID, evAChID, evBChID                                               *string
+			oldEntityID, evAChID, evBChID                                                *string
 		}
 		if err := contraRows.Scan(&item.oldID, &item.oldEntityID, &item.severity, &item.desc, &item.suggestion,
 			&item.evidenceA, &item.evAChID, &item.evidenceB, &item.evBChID, &item.fingerprint, &item.status); err != nil {
@@ -389,10 +389,10 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 		return "", fmt.Errorf("query template timeline events: %w", err)
 	}
 	var timelineEvents []struct {
-		oldID, title, desc, label       string
-		oldEventEntityID, oldChapterID  *string
-		tlPos                           *float64
-		participants                    []string
+		oldID, title, desc, label      string
+		oldEventEntityID, oldChapterID *string
+		tlPos                          *float64
+		participants                   []string
 	}
 	for tlRows.Next() {
 		var item struct {

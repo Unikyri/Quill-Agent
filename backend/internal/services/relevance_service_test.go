@@ -332,9 +332,9 @@ func TestReactivateTriggersDeconsolidation(t *testing.T) {
 
 // spyConsolidator records calls to ConsolidateEntity and DeconsolidateEntity.
 type spyConsolidator struct {
-	mu                  sync.Mutex
-	consolidateCalls    []uuid.UUID
-	deconsolidateCalls  []uuid.UUID
+	mu                 sync.Mutex
+	consolidateCalls   []uuid.UUID
+	deconsolidateCalls []uuid.UUID
 }
 
 func (s *spyConsolidator) ConsolidateEntity(ctx context.Context, entityID, universeID uuid.UUID) error {
@@ -456,10 +456,10 @@ func svcCreateTestUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool) *m
 
 func svcCreateTestUniverse(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID) models.Universe {
 	t.Helper()
-	u := models.Universe{ID: uuid.New(), UserID: userID, Name: "Test Universe", Description: "", Genre: "", Format: "novel"}
+	u := models.Universe{ID: uuid.New(), UserID: userID, Name: "Test Universe", Description: "", GenreTags: []string{"fantasy"}}
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO universes (id, user_id, name, description, genre, format) VALUES ($1, $2, $3, $4, $5, $6)",
-		u.ID, u.UserID, u.Name, u.Description, u.Genre, u.Format); err != nil {
+		u.ID, u.UserID, u.Name, u.Description, "", "novel"); err != nil {
 		t.Fatalf("create universe: %v", err)
 	}
 	return u

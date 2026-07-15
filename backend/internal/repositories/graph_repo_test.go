@@ -243,6 +243,43 @@ func TestGraphRepoNHopTraversal(t *testing.T) {
 	}
 }
 
+func TestGraphRepoNHopTraversalIncludesIsolatedFocal(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "011")
+	if !testutil.CheckAGE(t, pool) {
+		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
+	}
+
+	ctx := context.Background()
+	repo := NewGraphRepo(pool)
+	graphID := uuid.NewString()
+	if err := repo.CreateGraph(ctx, graphID); err != nil {
+		t.Fatalf("CreateGraph: %v", err)
+	}
+
+	entityID := uuid.NewString()
+	graphName := "universe_" + graphID
+	if err := repo.CreateNode(ctx, graphName, "Character", map[string]interface{}{
+		"entity_id":       entityID,
+		"name":            "Isolated",
+		"status":          "active",
+		"relevance_score": 0.8,
+	}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	nodes, edges, err := repo.NHopTraversal(ctx, graphName, entityID, 2)
+	if err != nil {
+		t.Fatalf("NHopTraversal: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].ID != entityID {
+		t.Fatalf("expected isolated focal node %q, got %#v", entityID, nodes)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("expected no edges for isolated focal node, got %#v", edges)
+	}
+}
+
 // TestGraphRepoDeleteEdge removes an edge between two nodes.
 func TestGraphRepoDeleteEdge(t *testing.T) {
 	pool := testutil.SetupTestDB(t)

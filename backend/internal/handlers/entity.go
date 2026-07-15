@@ -40,6 +40,12 @@ func (h *EntityHandler) ListByUniverse(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
 		})
 	}
+	countsByType, err := h.entitySvc.CountByType(c.Context(), universeID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+		})
+	}
 
 	totalPages := total / filters.Limit
 	if total%filters.Limit > 0 {
@@ -47,7 +53,8 @@ func (h *EntityHandler) ListByUniverse(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"entities": entities,
+		"entities":       entities,
+		"counts_by_type": countsByType,
 		"pagination": fiber.Map{
 			"page":        filters.Page,
 			"limit":       filters.Limit,

@@ -11,14 +11,14 @@ Work through the tasks in order — each task lists its files, steps, and expect
 
 ---
 
-## Task 0.1 — Migration `020`: both taxonomies (TX-1..6, ET-2)
+## Task 0.1 — Migration `021`: both taxonomies (TX-1..6, ET-2)
 
-**Files:** `backend/migrations/020_taxonomy.up.sql`, `backend/migrations/020_taxonomy.down.sql`
+**Files:** `backend/migrations/021_taxonomy.up.sql`, `backend/migrations/021_taxonomy.down.sql`
 
 One migration carries both taxonomy changes; they are one conceptual change ("close the
 vocabularies") and they roll back together.
 
-**Steps — `020_taxonomy.up.sql`:**
+**Steps — `021_taxonomy.up.sql`:**
 
 1. Universes:
    ```sql
@@ -50,16 +50,16 @@ vocabularies") and they roll back together.
    Before writing the mapping UPDATEs, run `SELECT DISTINCT type FROM entities;` against a
    dev DB with real ingested data and cover every value found.
 
-**Steps — `020_taxonomy.down.sql`:** restore `genre` (first tag wins: `genre_tags[1]`),
+**Steps — `021_taxonomy.down.sql`:** restore `genre` (first tag wins: `genre_tags[1]`),
 restore `universes.format` from the most common work type per universe (or `'novel'`),
 drop both CHECK constraints, drop `genre_tags`.
 
 **Watch out:** migration `014` seeds the demo universe — check what `type` values it
-inserts for entities and what `genre`/`format` it sets, and make sure the 020 data
+inserts for entities and what `genre`/`format` it sets, and make sure the 021 data
 migration maps them cleanly (the migration runs after 014 in a fresh compose boot).
 
 **Expected result:** `docker compose down -v && docker compose up -d` boots clean; the
-`migrations` service applies 020 without error; `\d entities` shows the CHECK constraint.
+`migrations` service applies 021 without error; `\d entities` shows the CHECK constraint.
 
 ---
 
@@ -234,7 +234,7 @@ survive reload; no panel truncates its own labels at any allowed width.
 
 ## Definition of done
 
-- [ ] `docker compose down -v && docker compose up -d` boots; migration 020 applies; down.sql restores the prior shape.
+- [ ] `docker compose down -v && docker compose up -d` boots; migration 021 applies; down.sql restores the prior shape.
 - [ ] `go build ./...` and `go test ./...` pass; a repo test asserts an invalid entity type is **rejected by the DB** (ET-2 verification).
 - [ ] `npm run build` and `npm run test` pass; a component test asserts **all filter chips render** and the displayed total equals `pagination.total` (FE-1/FE-3 verification).
 - [ ] Manual pass: create universe (multi-genre select), create work (format select), ingest the demo fixture, open Entities (all reachable), open Graph (neighborhood, not ring), collapse panels.

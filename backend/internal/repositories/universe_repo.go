@@ -21,10 +21,10 @@ func NewUniverseRepo(pool *pgxpool.Pool) *UniverseRepo {
 
 func (r *UniverseRepo) Create(ctx context.Context, tx pgx.Tx, u *models.Universe) error {
 	query := `
-		INSERT INTO universes (id, user_id, name, description, genre, format, session_id, is_demo_template, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+		INSERT INTO universes (id, user_id, name, description, genre_tags, session_id, is_demo_template, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
 	`
-	_, err := tx.Exec(ctx, query, u.ID, u.UserID, u.Name, u.Description, u.Genre, u.Format, u.SessionID, u.IsDemoTemplate)
+	_, err := tx.Exec(ctx, query, u.ID, u.UserID, u.Name, u.Description, u.GenreTags, u.SessionID, u.IsDemoTemplate)
 	if err != nil {
 		return fmt.Errorf("create universe: %w", err)
 	}
@@ -33,12 +33,12 @@ func (r *UniverseRepo) Create(ctx context.Context, tx pgx.Tx, u *models.Universe
 
 func (r *UniverseRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Universe, error) {
 	query := `
-		SELECT id, user_id, name, description, genre, format, session_id, is_demo_template, created_at, updated_at
+		SELECT id, user_id, name, description, genre_tags, session_id, is_demo_template, created_at, updated_at
 		FROM universes WHERE id = $1
 	`
 	u := &models.Universe{}
 	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&u.ID, &u.UserID, &u.Name, &u.Description, &u.Genre, &u.Format,
+		&u.ID, &u.UserID, &u.Name, &u.Description, &u.GenreTags,
 		&u.SessionID, &u.IsDemoTemplate, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -60,7 +60,7 @@ func (r *UniverseRepo) ListByUser(ctx context.Context, userID uuid.UUID, page, l
 	}
 
 	query := `
-		SELECT id, user_id, name, description, genre, format, session_id, is_demo_template, created_at, updated_at
+		SELECT id, user_id, name, description, genre_tags, session_id, is_demo_template, created_at, updated_at
 		FROM universes WHERE user_id = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
@@ -75,7 +75,7 @@ func (r *UniverseRepo) ListByUser(ctx context.Context, userID uuid.UUID, page, l
 	for rows.Next() {
 		var u models.Universe
 		if err := rows.Scan(
-			&u.ID, &u.UserID, &u.Name, &u.Description, &u.Genre, &u.Format,
+			&u.ID, &u.UserID, &u.Name, &u.Description, &u.GenreTags,
 			&u.SessionID, &u.IsDemoTemplate, &u.CreatedAt, &u.UpdatedAt,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan universe: %w", err)
@@ -88,10 +88,10 @@ func (r *UniverseRepo) ListByUser(ctx context.Context, userID uuid.UUID, page, l
 
 func (r *UniverseRepo) Update(ctx context.Context, tx pgx.Tx, u *models.Universe) error {
 	query := `
-		UPDATE universes SET name=$1, description=$2, genre=$3, format=$4, updated_at=NOW()
-		WHERE id=$5
+		UPDATE universes SET name=$1, description=$2, genre_tags=$3, updated_at=NOW()
+		WHERE id=$4
 	`
-	_, err := tx.Exec(ctx, query, u.Name, u.Description, u.Genre, u.Format, u.ID)
+	_, err := tx.Exec(ctx, query, u.Name, u.Description, u.GenreTags, u.ID)
 	if err != nil {
 		return fmt.Errorf("update universe: %w", err)
 	}
@@ -109,12 +109,12 @@ func (r *UniverseRepo) Delete(ctx context.Context, tx pgx.Tx, id uuid.UUID) erro
 
 func (r *UniverseRepo) FindBySessionID(ctx context.Context, sessionID string) (*models.Universe, error) {
 	query := `
-		SELECT id, user_id, name, description, genre, format, session_id, is_demo_template, created_at, updated_at
+		SELECT id, user_id, name, description, genre_tags, session_id, is_demo_template, created_at, updated_at
 		FROM universes WHERE session_id = $1
 	`
 	u := &models.Universe{}
 	err := r.pool.QueryRow(ctx, query, sessionID).Scan(
-		&u.ID, &u.UserID, &u.Name, &u.Description, &u.Genre, &u.Format,
+		&u.ID, &u.UserID, &u.Name, &u.Description, &u.GenreTags,
 		&u.SessionID, &u.IsDemoTemplate, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {

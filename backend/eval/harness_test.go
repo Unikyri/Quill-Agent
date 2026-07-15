@@ -287,11 +287,10 @@ func createLatencyUniverse(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	universeID := uuid.New()
 	universeRepo := repositories.NewUniverseRepo(pool)
 	u := &models.Universe{
-		ID:     universeID,
-		UserID: userID,
-		Name:   "Latency Universe",
-		Format: "novel",
-		Genre:  "fantasy",
+		ID:        universeID,
+		UserID:    userID,
+		Name:      "Latency Universe",
+		GenreTags: []string{"fantasy"},
 	}
 	if err := universeRepo.Create(ctx, tx, u); err != nil {
 		t.Fatalf("create latency universe: %v", err)

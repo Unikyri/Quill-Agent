@@ -17,12 +17,12 @@ starts believing its own measurements are the writer's wishes.
 
 ---
 
-## Task 4.1 — Migration `022`: the three tables
+## Task 4.1 — Migration `023`: the three tables
 
 **Files:** `backend/migrations/022_writer_memory.up.sql` / `.down.sql`
 
-> Numbering note: `021` was consumed by Sprint 2's entity natural-key index, so Writer
-> Memory lands as `022` and the skills association (Sprint 5) as `023`. The SRS wrote
+> Numbering note: `022` is consumed by Sprint 2's entity natural-key index, so Writer
+> Memory lands as `023` and the skills association (Sprint 5) as `024`. The SRS wrote
 > these as 021/022 before sprint order was fixed — the schemas in SRS §6.1 are the
 > contract; only the numbers shift.
 
@@ -167,7 +167,7 @@ list and a comprehensible, non-empty preferences panel.
 
 ## Definition of done
 
-- [ ] Migration `022` up/down clean; three tables per SRS §6.1 schemas.
+- [ ] Migration `023` up/down clean; three tables per SRS §6.1 schemas.
 - [ ] Stylometry writes observations only, zero LLM (structurally: no client dependency), covered by deterministic tests.
 - [ ] Promotion requires an intent signal; scope classification is writer-correctable.
 - [ ] **The defining test passes: a note rejected three times stops being emitted (WM-5).**

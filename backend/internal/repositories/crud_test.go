@@ -25,7 +25,7 @@ func createTestUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool) *mode
 
 func TestUniverseRepoCRUD(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "004")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	ctx := context.Background()
 
 	user := createTestUser(t, ctx, pool)
@@ -38,10 +38,10 @@ func TestUniverseRepoCRUD(t *testing.T) {
 	defer tx.Rollback(ctx)
 
 	u := &models.Universe{
-		ID:     uuid.New(),
-		UserID: user.ID,
-		Name:   "Test Universe",
-		Format: "novel",
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		Name:      "Test Universe",
+		GenreTags: []string{"fantasy"},
 	}
 	if err := repo.Create(ctx, tx, u); err != nil {
 		t.Fatalf("create universe: %v", err)
@@ -88,7 +88,7 @@ func TestUniverseRepoCRUD(t *testing.T) {
 
 func TestWorkRepoCRUD(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "004")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	ctx := context.Background()
 
 	user := createTestUser(t, ctx, pool)
@@ -96,7 +96,7 @@ func TestWorkRepoCRUD(t *testing.T) {
 	workRepo := NewWorkRepo(pool)
 
 	utx, _ := pool.Begin(ctx)
-	u := &models.Universe{ID: uuid.New(), UserID: user.ID, Name: "U", Format: "novel"}
+	u := &models.Universe{ID: uuid.New(), UserID: user.ID, Name: "U", GenreTags: []string{"fantasy"}}
 	if err := universeRepo.Create(ctx, utx, u); err != nil {
 		t.Fatalf("create universe: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestWorkRepoCRUD(t *testing.T) {
 		ID:         uuid.New(),
 		UniverseID: u.ID,
 		Title:      "Test Work",
-		Type:       "book",
+		Type:       "novel",
 		OrderIndex: 1,
 		Status:     "in_progress",
 	}
@@ -143,7 +143,7 @@ func TestWorkRepoCRUD(t *testing.T) {
 
 func TestChapterRepoCRUD(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "004")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	ctx := context.Background()
 
 	user := createTestUser(t, ctx, pool)
@@ -152,12 +152,12 @@ func TestChapterRepoCRUD(t *testing.T) {
 	chapterRepo := NewChapterRepo(pool)
 
 	utx, _ := pool.Begin(ctx)
-	u := &models.Universe{ID: uuid.New(), UserID: user.ID, Name: "U", Format: "novel"}
+	u := &models.Universe{ID: uuid.New(), UserID: user.ID, Name: "U", GenreTags: []string{"fantasy"}}
 	universeRepo.Create(ctx, utx, u)
 	utx.Commit(ctx)
 
 	wtx, _ := pool.Begin(ctx)
-	w := &models.Work{ID: uuid.New(), UniverseID: u.ID, Title: "W", Type: "book", OrderIndex: 1, Status: "in_progress"}
+	w := &models.Work{ID: uuid.New(), UniverseID: u.ID, Title: "W", Type: "novel", OrderIndex: 1, Status: "in_progress"}
 	workRepo.Create(ctx, wtx, w)
 	wtx.Commit(ctx)
 

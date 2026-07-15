@@ -17,8 +17,8 @@ func setupContradictionFixtures(t *testing.T, pool *pgxpool.Pool) (models.Univer
 	ctx := context.Background()
 	user := createTestUser(t, ctx, pool)
 
-	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Test Universe", Format: "novel"}
-	work := models.Work{ID: uuid.New(), UniverseID: universe.ID, Title: "Test Work", Type: "book", OrderIndex: 1, Status: "in_progress"}
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Test Universe", GenreTags: []string{"fantasy"}}
+	work := models.Work{ID: uuid.New(), UniverseID: universe.ID, Title: "Test Work", Type: "novel", OrderIndex: 1, Status: "in_progress"}
 	chapter := models.Chapter{ID: uuid.New(), WorkID: work.ID, Title: "Ch1", OrderIndex: 1, Content: "content", RawText: "text", WordCount: 10, Status: "draft"}
 	entity := models.Entity{ID: uuid.New(), UniverseID: universe.ID, Type: "character", Name: "Test Entity", Status: "active", RelevanceScore: 0.8}
 
@@ -29,7 +29,7 @@ func setupContradictionFixtures(t *testing.T, pool *pgxpool.Pool) (models.Univer
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, "INSERT INTO universes (id, user_id, name, format) VALUES ($1,$2,$3,$4)",
-		universe.ID, universe.UserID, universe.Name, universe.Format); err != nil {
+		universe.ID, universe.UserID, universe.Name, "novel"); err != nil {
 		t.Fatalf("insert universe: %v", err)
 	}
 	if _, err := tx.Exec(ctx, "INSERT INTO works (id, universe_id, title, type, order_index, status) VALUES ($1,$2,$3,$4,$5,$6)",
@@ -131,12 +131,12 @@ func TestContradictionRepoListByUniverse(t *testing.T) {
 	}
 
 	c2 := &models.Contradiction{
-		ID:                 uuid.New(),
-		UniverseID:         universe.ID,
-		Severity:           "major",
-		Description:        "Second contradiction",
-		Fingerprint:        "fp-list-2",
-		Status:             "open",
+		ID:          uuid.New(),
+		UniverseID:  universe.ID,
+		Severity:    "major",
+		Description: "Second contradiction",
+		Fingerprint: "fp-list-2",
+		Status:      "open",
 	}
 	if err := repo.Create(ctx, c2); err != nil {
 		t.Fatalf("Create c2: %v", err)

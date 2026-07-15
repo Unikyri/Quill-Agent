@@ -469,15 +469,7 @@ func (s *AnalysisService) extractEntities(ctx context.Context, universeID uuid.U
 	}
 
 	// Collect all extracted entities from all categories
-	allEntities := make([]ExtractedEntity, 0)
-	if extracted != nil {
-		allEntities = append(allEntities, extracted.Characters...)
-		allEntities = append(allEntities, extracted.Places...)
-		allEntities = append(allEntities, extracted.Events...)
-		allEntities = append(allEntities, extracted.Factions...)
-		allEntities = append(allEntities, extracted.WorldRules...)
-		allEntities = append(allEntities, extracted.PlotDevelopments...)
-	}
+	allEntities := extracted.All()
 
 	// ponytail: use first 120 chars of text as mention context
 	mentionText := text
@@ -501,19 +493,19 @@ func (s *AnalysisService) extractEntities(ctx context.Context, universeID uuid.U
 			continue
 		}
 		resolved = append(resolved, ResolvedEntity{
-				Entity:         *entity,
-				MentionText:    mentionText,
-				IsNew:          isNew,
-				PreviousStatus: previousStatus,
-			})
+			Entity:         *entity,
+			MentionText:    mentionText,
+			IsNew:          isNew,
+			PreviousStatus: previousStatus,
+		})
 
-			// spec: when an archived entity is re-mentioned, reactivate it
-			if previousStatus == "archived" && s.relevSvc != nil {
-				if err := s.relevSvc.Reactivate(ctx, entity.ID); err != nil {
-					log.Printf("[analysis] reactivate entity %s: %v", entity.ID, err)
-				}
+		// spec: when an archived entity is re-mentioned, reactivate it
+		if previousStatus == "archived" && s.relevSvc != nil {
+			if err := s.relevSvc.Reactivate(ctx, entity.ID); err != nil {
+				log.Printf("[analysis] reactivate entity %s: %v", entity.ID, err)
 			}
 		}
+	}
 
 	return resolved, nil
 }

@@ -16,8 +16,8 @@ func setupTimelineFixtures(t *testing.T, pool *pgxpool.Pool) (models.Universe, m
 	ctx := context.Background()
 	user := createTestUser(t, ctx, pool)
 
-	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Timeline Universe", Format: "novel"}
-	work := models.Work{ID: uuid.New(), UniverseID: universe.ID, Title: "TL Work", Type: "book", OrderIndex: 1, Status: "in_progress"}
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Timeline Universe", GenreTags: []string{"fantasy"}}
+	work := models.Work{ID: uuid.New(), UniverseID: universe.ID, Title: "TL Work", Type: "novel", OrderIndex: 1, Status: "in_progress"}
 	chapter := models.Chapter{ID: uuid.New(), WorkID: work.ID, Title: "Ch1", OrderIndex: 5, Content: "content", RawText: "text", WordCount: 10, Status: "draft"}
 	entity := models.Entity{ID: uuid.New(), UniverseID: universe.ID, Type: "character", Name: "TL Entity", Status: "active", RelevanceScore: 0.8}
 
@@ -28,7 +28,7 @@ func setupTimelineFixtures(t *testing.T, pool *pgxpool.Pool) (models.Universe, m
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, "INSERT INTO universes (id, user_id, name, format) VALUES ($1,$2,$3,$4)",
-		universe.ID, universe.UserID, universe.Name, universe.Format); err != nil {
+		universe.ID, universe.UserID, universe.Name, "novel"); err != nil {
 		t.Fatalf("insert universe: %v", err)
 	}
 	if _, err := tx.Exec(ctx, "INSERT INTO works (id, universe_id, title, type, order_index, status) VALUES ($1,$2,$3,$4,$5,$6)",

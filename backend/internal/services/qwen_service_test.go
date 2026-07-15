@@ -40,10 +40,10 @@ func TestQwenServiceChatResponseParsing(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{
-		QwenBaseURL:           server.URL,
-		QwenAPIKey:            "test-key",
-		QwenMaxConcurrency:    1,
-		QwenTurboConcurrency:  1,
+		QwenBaseURL:          server.URL,
+		QwenAPIKey:           "test-key",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
 	}
 	svc := NewQwenService(cfg, nil)
 
@@ -105,6 +105,30 @@ func TestExtractEntitiesSetsJSONResponseFormat(t *testing.T) {
 	}
 	if captured.ResponseFormat == nil || captured.ResponseFormat.Type != "json_object" {
 		t.Errorf("ExtractEntities request ResponseFormat = %+v, want {Type: json_object}", captured.ResponseFormat)
+	}
+}
+
+func TestExtractEntitiesSupportsObjectsAndClassificationCriteria(t *testing.T) {
+	var captured QwenRequest
+	server := httptest.NewServer(captureRequestBody(t, &captured, `{"characters":[],"places":[],"objects":[{"name":"Excalibur","type":"object","description":"A sword"}],"events":[],"factions":[],"world_rules":[],"plot_developments":[]}`))
+	defer server.Close()
+
+	cfg := &config.Config{QwenBaseURL: server.URL, QwenAPIKey: "test-key", QwenMaxConcurrency: 1, QwenTurboConcurrency: 1}
+	entities, err := NewQwenService(cfg, nil).ExtractEntities(context.Background(), "Excalibur gleamed.", "")
+	if err != nil {
+		t.Fatalf("ExtractEntities: %v", err)
+	}
+	if len(entities.Objects) != 1 || entities.Objects[0].Type != "object" {
+		t.Fatalf("ExtractEntities objects = %#v, want one object", entities.Objects)
+	}
+	if len(captured.Messages) < 2 {
+		t.Fatalf("ExtractEntities request has %d messages, want prompt message", len(captured.Messages))
+	}
+	prompt := captured.Messages[1].Content
+	for _, required := range []string{"\"objects\"", "if it decides, it is a character", "a pilot is a character, but the ship is an object"} {
+		if !strings.Contains(prompt, required) {
+			t.Errorf("extraction prompt missing %q", required)
+		}
 	}
 }
 
@@ -468,10 +492,10 @@ func TestQwenServiceChatAPIError(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{
-		QwenBaseURL:           server.URL,
-		QwenAPIKey:            "test-key",
-		QwenMaxConcurrency:    1,
-		QwenTurboConcurrency:  1,
+		QwenBaseURL:          server.URL,
+		QwenAPIKey:           "test-key",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
 	}
 	svc := NewQwenService(cfg, nil)
 

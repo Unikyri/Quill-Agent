@@ -45,6 +45,10 @@ func (s *EntityService) ListByUniverse(ctx context.Context, universeID uuid.UUID
 	return s.entityRepo.ListByUniverse(ctx, universeID, filters)
 }
 
+func (s *EntityService) CountByType(ctx context.Context, universeID uuid.UUID) (map[string]int, error) {
+	return s.entityRepo.CountByType(ctx, universeID)
+}
+
 func (s *EntityService) Update(ctx context.Context, id uuid.UUID, input models.UpdateEntityRequest) (*models.Entity, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

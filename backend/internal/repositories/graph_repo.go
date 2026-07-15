@@ -376,7 +376,10 @@ func (r *GraphRepo) NHopTraversal(ctx context.Context, graphName, startEntityID 
 	var nodes []GraphNode
 	var edges []GraphEdge
 	err := r.withAgeConn(ctx, func(c *pgx.Conn) error {
-		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (n {entity_id: '%s'})-[r*1..%d]-(m) RETURN n, r, m $$) AS (n agtype, r agtype, m agtype)`,
+		// Start with the focal node, then make its traversal optional. A plain
+		// relationship match emits no row for an isolated entity, which made the
+		// graph client lose its selected focal node entirely.
+		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (n {entity_id: '%s'}) OPTIONAL MATCH (n)-[r*1..%d]-(m) RETURN n, r, m $$) AS (n agtype, r agtype, m agtype)`,
 			quoteGraph(graphName), escapeCypherString(startEntityID), hops)
 		rows, err := c.Query(ctx, query)
 		if err != nil {

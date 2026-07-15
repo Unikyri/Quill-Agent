@@ -161,7 +161,7 @@ func (r *EntityRepo) ListByUniverse(ctx context.Context, universeID uuid.UUID, f
 		argIdx++
 	}
 	if filters.Search != "" {
-		where = append(where, fmt.Sprintf("(LOWER(name) LIKE $%d OR LOWER($%d) = ANY(SELECT LOWER(unnest(aliases)))", argIdx, argIdx))
+		where = append(where, fmt.Sprintf("(LOWER(name) LIKE $%d OR EXISTS (SELECT 1 FROM unnest(COALESCE(aliases, ARRAY[]::text[])) AS alias WHERE LOWER(alias) LIKE $%d))", argIdx, argIdx))
 		args = append(args, "%"+strings.ToLower(filters.Search)+"%")
 		argIdx++
 	}
@@ -204,6 +204,37 @@ func (r *EntityRepo) ListByUniverse(ctx context.Context, universeID uuid.UUID, f
 	}
 
 	return entities, total, nil
+}
+
+// CountByType returns the number of entities stored for each type in a universe.
+// It intentionally includes archived entities: the browser's type chips describe
+// the universe's complete entity inventory, while status remains a list filter.
+func (r *EntityRepo) CountByType(ctx context.Context, universeID uuid.UUID) (map[string]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT type, COUNT(*)
+		FROM entities
+		WHERE universe_id = $1
+		GROUP BY type
+	`, universeID)
+	if err != nil {
+		return nil, fmt.Errorf("count entities by type: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var entityType string
+		var count int
+		if err := rows.Scan(&entityType, &count); err != nil {
+			return nil, fmt.Errorf("scan entity type count: %w", err)
+		}
+		counts[entityType] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate entity type counts: %w", err)
+	}
+
+	return counts, nil
 }
 
 func (r *EntityRepo) Update(ctx context.Context, tx pgx.Tx, e *models.Entity) error {

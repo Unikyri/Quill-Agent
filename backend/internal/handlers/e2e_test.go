@@ -55,7 +55,7 @@ func TestE2EFullFlow(t *testing.T) {
 	}
 
 	// ── Create Universe ──
-	universeBody := `{"name":"E2E Universe","description":"Test","genre":"fantasy","format":"novel"}`
+	universeBody := `{"name":"E2E Universe","description":"Test","genre_tags":["fantasy"]}`
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/universes", toReader(universeBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -130,7 +130,7 @@ func setupE2EApp(t *testing.T) (*pgxpool.Pool, *fiber.App) {
 	t.Helper()
 
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "019")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 
 	cfg := &config.Config{
 		DatabaseURL:                "postgres://localhost:5432/test",
