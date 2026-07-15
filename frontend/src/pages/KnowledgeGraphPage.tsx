@@ -6,6 +6,7 @@ import { UniverseContext } from '../contexts/UniverseContext'
 import GraphCanvas from '../components/knowledge-graph/GraphCanvas'
 import GraphControls from '../components/knowledge-graph/GraphControls'
 import PageStatus from '../components/shared/PageStatus'
+import { api } from '../lib/api'
 import styles from './KnowledgeGraphPage.module.css'
 
 export default function KnowledgeGraphPage() {
@@ -18,9 +19,14 @@ export default function KnowledgeGraphPage() {
   const error = useGraphStore((s) => s.error)
   const nodes = useGraphStore((s) => s.nodes)
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
+  const focalNodeId = useGraphStore((s) => s.focalNodeId)
+  const breadcrumb = useGraphStore((s) => s.breadcrumb)
+  const focusNode = useGraphStore((s) => s.focusNode)
+  const goBack = useGraphStore((s) => s.goBack)
   const graphPings = useWSStore((s) => s.graphPings)
   const prevPingCount = useRef(graphPings.length)
-  const [semanticQuery, setSemanticQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; name: string; type: string }>>([])
 
   useEffect(() => {
     if (universeId) fetchGraph(universeId)
@@ -33,16 +39,23 @@ export default function KnowledgeGraphPage() {
     }
   }, [graphPings, refresh])
 
+  useEffect(() => {
+    if (!universeId || !searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+    const timer = window.setTimeout(() => {
+      api.listEntities(universeId, { search: searchQuery.trim(), limit: '8' })
+        .then((response) => setSearchResults(response.entities || []))
+        .catch(() => setSearchResults([]))
+    }, 180)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery, universeId])
+
   // Selected node data
   const selectedNodeData = selectedNodeId
     ? nodes.find((n) => n.id === selectedNodeId)
     : null
-
-  const LEGEND_ITEMS = [
-    { label: 'Character', color: 'var(--node-character)' },
-    { label: 'Place', color: 'var(--node-place)' },
-    { label: 'Object', color: 'var(--node-event)' },
-  ]
 
   if (loading || error) {
     return (
@@ -76,19 +89,6 @@ export default function KnowledgeGraphPage() {
           <>
             <GraphControls />
             <GraphCanvas />
-            {/* Legend */}
-            <div className={styles.legend}>
-              {LEGEND_ITEMS.map((item) => (
-                <div key={item.label} className={styles.legendItem}>
-                  <span className={styles.legendDot} style={{ background: item.color }} />
-                  {item.label}
-                </div>
-              ))}
-              <div className={styles.legendItem}>
-                <span className={styles.legendDash} />
-                Conflict
-              </div>
-            </div>
           </>
         )}
       </div>
@@ -108,8 +108,8 @@ export default function KnowledgeGraphPage() {
                 <div className={styles.statTileLabel}>Links</div>
               </div>
               <div className={styles.statTile}>
-                <div className={styles.statTileValue}>3</div>
-                <div className={styles.statTileLabel}>Max hops</div>
+              <div className={styles.statTileValue}>2</div>
+              <div className={styles.statTileLabel}>Max hops</div>
               </div>
               <div className={styles.statTile}>
                 <div className={styles.statTileValue}>{String((selectedNodeData.data as { relevance?: number })?.relevance ?? '—')}</div>
@@ -152,14 +152,47 @@ export default function KnowledgeGraphPage() {
           </>
         )}
 
-        {/* Semantic search — always shown */}
+        <div className={styles.graphSearch}>
+          <div className={styles.semanticKicker}>Jump to entity</div>
+          <input
+            className={styles.semanticInput}
+            placeholder="Search a name or alias…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchResults.length > 0 && (
+            <div className={styles.searchResults}>
+              {searchResults.map((entity) => (
+                <button
+                  key={entity.id}
+                  className={styles.searchResult}
+                  onClick={() => { void focusNode(entity.id); setSearchQuery(''); setSearchResults([]) }}
+                >
+                  <span>{entity.name}</span><small>{entity.type.replace('_', ' ')}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {breadcrumb.length > 0 && (
+          <button className={styles.backButton} onClick={() => void goBack()}>
+            ← Back to previous focal
+          </button>
+        )}
+
+        {focalNodeId && (
+          <p className={styles.focalNote}>Showing the focal entity and its two-hop neighborhood.</p>
+        )}
+
+        {/* Semantic search stays available for a later recall-specific interaction. */}
         <div className={styles.semanticSection}>
           <div className={styles.semanticKicker}>Semantic Memory</div>
           <input
             className={styles.semanticInput}
             placeholder="How does magic work?"
-            value={semanticQuery}
-            onChange={(e) => setSemanticQuery(e.target.value)}
+            value=""
+            readOnly
             onKeyDown={(e) => { if (e.key === 'Enter') { /* TODO: query semantic memory */ } }}
           />
         </div>

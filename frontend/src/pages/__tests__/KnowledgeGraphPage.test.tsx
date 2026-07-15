@@ -22,10 +22,12 @@ const { pingBox } = vi.hoisted(() => {
 })
 
 // Mock api
-const mockGetGraph = vi.fn()
+const mockListEntities = vi.fn()
+const mockGetEntityNeighbors = vi.fn()
 vi.mock('../../lib/api', () => ({
   api: {
-    getGraph: (...args: unknown[]) => mockGetGraph(...args),
+    listEntities: (...args: unknown[]) => mockListEntities(...args),
+    getEntityNeighbors: (...args: unknown[]) => mockGetEntityNeighbors(...args),
   },
 }))
 
@@ -64,23 +66,25 @@ beforeEach(() => {
     nodes: [],
     edges: [],
     selectedNodeId: null,
-    nodeFilter: { character: true, place: true, event: true, faction: true, world_rule: true, plot_arc: true },
+    nodeFilter: { character: true, place: true, object: true, event: true, faction: true, world_rule: true, plot_arc: true },
     loading: false,
     error: null,
     _universeId: null,
+    focalNodeId: null,
+    breadcrumb: [],
   })
 })
 
 describe('KnowledgeGraphPage', () => {
   it('shows loading state initially', () => {
     // Freeze the promise so loading state persists
-    mockGetGraph.mockReturnValue(new Promise(() => {}))
+    mockListEntities.mockReturnValue(new Promise(() => {}))
     renderPage()
     expect(screen.getByTestId('loading-state')).toBeInTheDocument()
   })
 
   it('shows empty state when graph has zero nodes', async () => {
-    mockGetGraph.mockResolvedValue({ nodes: [], edges: [] })
+    mockListEntities.mockResolvedValue({ entities: [] })
     renderPage()
 
     await waitFor(() => {
@@ -89,9 +93,10 @@ describe('KnowledgeGraphPage', () => {
   })
 
   it('renders graph controls and canvas when nodes exist', async () => {
-    mockGetGraph.mockResolvedValue({
+    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1' }] })
+    mockGetEntityNeighbors.mockResolvedValue({
       nodes: [
-        { id: 'n1', type: 'character', position: { x: 0, y: 0 }, data: { label: 'Alice' } },
+        { id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } },
       ],
       edges: [],
     })
@@ -100,13 +105,13 @@ describe('KnowledgeGraphPage', () => {
     await waitFor(() => {
       // "Character" is rendered both by the filter bar (GraphControls) and the
       // page's own legend — disambiguate with getAllByText instead of getByText.
-      expect(screen.getAllByText('Character').length).toBeGreaterThanOrEqual(2)
-      expect(screen.getAllByText('Place').length).toBeGreaterThanOrEqual(2)
+      expect(screen.getByText('Character')).toBeInTheDocument()
+      expect(screen.getByText('Place')).toBeInTheDocument()
     })
   })
 
   it('shows error state on API failure', async () => {
-    mockGetGraph.mockRejectedValue(new Error('Fetch failed'))
+    mockListEntities.mockRejectedValue(new Error('Fetch failed'))
     renderPage()
 
     await waitFor(() => {
@@ -116,7 +121,7 @@ describe('KnowledgeGraphPage', () => {
   })
 
   it('shows retry button on error', async () => {
-    mockGetGraph.mockRejectedValue(new Error('Oops'))
+    mockListEntities.mockRejectedValue(new Error('Oops'))
     renderPage()
 
     await waitFor(() => {
@@ -125,17 +130,18 @@ describe('KnowledgeGraphPage', () => {
   })
 
   it('calls refresh when WS graph_updated ping arrives via wsStore', async () => {
-    mockGetGraph.mockResolvedValue({
-      nodes: [{ id: 'n1', type: 'character', position: { x: 0, y: 0 }, data: { label: 'Alice' } }],
+    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1' }] })
+    mockGetEntityNeighbors.mockResolvedValue({
+      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
       edges: [],
     })
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getAllByText('Character').length).toBeGreaterThanOrEqual(2)
+      expect(screen.getByText('Character')).toBeInTheDocument()
     })
     // fetchGraph called once during load
-    expect(mockGetGraph).toHaveBeenCalledTimes(1)
+    expect(mockGetEntityNeighbors).toHaveBeenCalledTimes(1)
 
     // Simulate WS ping: assign a new array so effect dependency reference changes
     pingBox.value = [{ type: 'graph_updated' }]
@@ -146,14 +152,14 @@ describe('KnowledgeGraphPage', () => {
       useGraphStore.setState({ nodes: [...nodes] })
     })
 
-    // refresh() calls api.getGraph internally — should now be called twice
+    // refresh() keeps the current focal neighborhood fresh.
     await waitFor(() => {
-      expect(mockGetGraph).toHaveBeenCalledTimes(2)
+      expect(mockGetEntityNeighbors).toHaveBeenCalledTimes(2)
     })
   })
 
   it('renders CTA button in empty state that navigates to ingestion', async () => {
-    mockGetGraph.mockResolvedValue({ nodes: [], edges: [] })
+    mockListEntities.mockResolvedValue({ entities: [] })
     renderPage()
 
     await waitFor(() => {

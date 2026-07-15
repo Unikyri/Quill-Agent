@@ -107,6 +107,51 @@
 
 .semanticSection {}
 
+.graphSearch { position: relative; }
+
+.searchResults {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  box-shadow: 0 8px 22px rgba(43, 38, 32, 0.14);
+}
+
+.searchResult {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 12px;
+  text-align: left;
+}
+.searchResult:hover { background: var(--hover); }
+.searchResult small { color: var(--muted-2); text-transform: capitalize; }
+
+.backButton {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  cursor: pointer;
+  font: 600 12px var(--sans);
+  padding: 4px 0;
+}
+
+.focalNote { margin: 0; color: var(--muted-2); font-size: 11px; font-style: italic; }
+
 .semanticKicker {
   font-family: var(--mono);
   font-size: 9px;

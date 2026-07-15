@@ -2,15 +2,34 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useGraphStore } from '../graphStore'
 
 // Mock api
-const mockGetGraph = vi.fn()
+const mockListEntities = vi.fn()
+const mockGetEntityNeighbors = vi.fn()
 vi.mock('../../lib/api', () => ({
   api: {
-    getGraph: (...args: unknown[]) => mockGetGraph(...args),
+    listEntities: (...args: unknown[]) => mockListEntities(...args),
+    getEntityNeighbors: (...args: unknown[]) => mockGetEntityNeighbors(...args),
   },
 }))
 
 function getStore() {
   return useGraphStore.getState()
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+function graphNode(id: string, name: string) {
+  return {
+    id,
+    properties: {
+      raw: `{"id":1,"label":"character","properties":{"entity_id":"${id}","name":"${name}","status":"active","relevance_score":0.7}}`,
+    },
+  }
 }
 
 // Backend returns {id, labels, properties: {raw}} where raw is the agtype vertex
@@ -31,10 +50,14 @@ beforeEach(() => {
     nodes: [],
     edges: [],
     selectedNodeId: null,
-    nodeFilter: { character: true, place: true, event: true, faction: true, world_rule: true, plot_arc: true },
+    nodeFilter: { character: true, place: true, object: true, event: true, faction: true, world_rule: true, plot_arc: true },
+    showArchived: false,
     loading: false,
     error: null,
+    requestVersion: 0,
     _universeId: null,
+    focalNodeId: null,
+    breadcrumb: [],
   })
 })
 
@@ -55,6 +78,10 @@ describe('graphStore', () => {
       expect(f.plot_arc).toBe(true)
     })
 
+    it('hides archived entities by default', () => {
+      expect(getStore().showArchived).toBe(false)
+    })
+
     it('has null selectedNodeId', () => {
       expect(getStore().selectedNodeId).toBeNull()
     })
@@ -67,7 +94,8 @@ describe('graphStore', () => {
 
   describe('fetchGraph', () => {
     it('sets loading true and populates nodes/edges on success', async () => {
-      mockGetGraph.mockResolvedValue({ nodes: mockBackendNodes, edges: mockBackendEdges })
+      mockListEntities.mockResolvedValue({ entities: [{ id: 'n1' }] })
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: mockBackendNodes, edges: mockBackendEdges })
 
       const promise = getStore().fetchGraph('uni-1')
       expect(getStore().loading).toBe(true)
@@ -91,26 +119,72 @@ describe('graphStore', () => {
     })
 
     it('sets error on failure', async () => {
-      mockGetGraph.mockRejectedValue(new Error('Network error'))
+      mockListEntities.mockRejectedValue(new Error('Network error'))
 
       await getStore().fetchGraph('uni-1')
       expect(getStore().loading).toBe(false)
       expect(getStore().error).toBe('Network error')
       expect(getStore().nodes).toEqual([])
     })
+
+    it('initializes an archived-only universe without making archived nodes visible by default', async () => {
+      const archivedFocal = {
+        id: 'n2',
+        properties: { raw: '{"id":2,"label":"place","properties":{"entity_id":"n2","name":"Archive","status":"archived","relevance_score":0.4}}' },
+      }
+      mockListEntities
+        .mockResolvedValueOnce({ entities: [] })
+        .mockResolvedValueOnce({ entities: [{ id: 'n2' }] })
+      mockGetEntityNeighbors.mockResolvedValueOnce({ nodes: [archivedFocal], edges: [] })
+
+      await getStore().fetchGraph('uni-1')
+
+      expect(mockListEntities).toHaveBeenNthCalledWith(1, 'uni-1', { limit: '1', status: 'active' })
+      expect(mockListEntities).toHaveBeenNthCalledWith(2, 'uni-1', { limit: '1', status: 'archived' })
+      expect(getStore().nodes).toHaveLength(1)
+      expect(getStore().focalNodeId).toBe('n2')
+      expect(getStore().nodes[0].data.status).toBe('archived')
+      expect(getStore().showArchived).toBe(false)
+    })
+
+    it('ignores a stale universe response after a newer graph fetch finishes', async () => {
+      const firstNeighborhood = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[] }>()
+      const secondNeighborhood = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[] }>()
+      mockListEntities
+        .mockResolvedValueOnce({ entities: [{ id: 'n1' }] })
+        .mockResolvedValueOnce({ entities: [{ id: 'n2' }] })
+      mockGetEntityNeighbors.mockImplementation((id: string) => (
+        id === 'n1' ? firstNeighborhood.promise : secondNeighborhood.promise
+      ))
+
+      const firstFetch = getStore().fetchGraph('uni-1')
+      await Promise.resolve()
+      const secondFetch = getStore().fetchGraph('uni-2')
+      await Promise.resolve()
+
+      secondNeighborhood.resolve({ nodes: [graphNode('n2', 'Second')], edges: [] })
+      await secondFetch
+      firstNeighborhood.resolve({ nodes: [graphNode('n1', 'First')], edges: [] })
+      await firstFetch
+
+      expect(getStore()._universeId).toBe('uni-2')
+      expect(getStore().focalNodeId).toBe('n2')
+      expect(getStore().nodes[0].data.label).toBe('Second')
+    })
   })
 
   describe('refresh', () => {
     it('refetches using stored universeId', async () => {
-      mockGetGraph.mockResolvedValueOnce({ nodes: mockBackendNodes, edges: mockBackendEdges })
+      mockListEntities.mockResolvedValueOnce({ entities: [{ id: 'n1' }] })
+      mockGetEntityNeighbors.mockResolvedValueOnce({ nodes: mockBackendNodes, edges: mockBackendEdges })
       await getStore().fetchGraph('uni-1')
       vi.clearAllMocks()
 
       const updatedNodes = [{ ...mockBackendNodes[0], properties: { ...mockBackendNodes[0].properties, raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice Updated","status":"active","relevance_score":0.7}}' } }]
-      mockGetGraph.mockResolvedValueOnce({ nodes: updatedNodes, edges: [] })
+      mockGetEntityNeighbors.mockResolvedValueOnce({ nodes: updatedNodes, edges: [] })
 
       await getStore().refresh()
-      expect(mockGetGraph).toHaveBeenCalledWith('uni-1')
+      expect(mockGetEntityNeighbors).toHaveBeenCalledWith('n1', 'uni-1', 2)
       expect(getStore().nodes).toHaveLength(1)
       expect(getStore().nodes[0].data.label).toBe('Alice Updated')
       expect(getStore().edges).toEqual([])
@@ -118,7 +192,54 @@ describe('graphStore', () => {
 
     it('does nothing if no universeId was set', async () => {
       await getStore().refresh()
-      expect(mockGetGraph).not.toHaveBeenCalled()
+      expect(mockGetEntityNeighbors).not.toHaveBeenCalled()
+    })
+
+    it('cannot overwrite a newer focal neighborhood when it resolves late', async () => {
+      const staleRefresh = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[] }>()
+      const focusedNeighborhood = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[] }>()
+      useGraphStore.setState({ _universeId: 'uni-1', focalNodeId: 'n1', selectedNodeId: 'n1' })
+      mockGetEntityNeighbors
+        .mockReturnValueOnce(staleRefresh.promise)
+        .mockReturnValueOnce(focusedNeighborhood.promise)
+
+      const refresh = getStore().refresh()
+      await Promise.resolve()
+      const focus = getStore().focusNode('n2')
+      await Promise.resolve()
+
+      focusedNeighborhood.resolve({ nodes: [graphNode('n2', 'Focused')], edges: [] })
+      await focus
+      staleRefresh.resolve({ nodes: [graphNode('n1', 'Stale')], edges: [] })
+      await refresh
+
+      expect(getStore().focalNodeId).toBe('n2')
+      expect(getStore().nodes[0].data.label).toBe('Focused')
+    })
+  })
+
+  describe('focusNode', () => {
+    it('keeps the newest focal selection when earlier clicks resolve late', async () => {
+      const firstFocus = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[] }>()
+      const secondFocus = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[] }>()
+      useGraphStore.setState({ _universeId: 'uni-1', focalNodeId: 'n1', selectedNodeId: 'n1' })
+      mockGetEntityNeighbors
+        .mockReturnValueOnce(firstFocus.promise)
+        .mockReturnValueOnce(secondFocus.promise)
+
+      const focusSecond = getStore().focusNode('n2')
+      await Promise.resolve()
+      const focusThird = getStore().focusNode('n3')
+      await Promise.resolve()
+
+      secondFocus.resolve({ nodes: [graphNode('n3', 'Newest')], edges: [] })
+      await focusThird
+      firstFocus.resolve({ nodes: [graphNode('n2', 'Stale')], edges: [] })
+      await focusSecond
+
+      expect(getStore().focalNodeId).toBe('n3')
+      expect(getStore().selectedNodeId).toBe('n3')
+      expect(getStore().nodes[0].data.label).toBe('Newest')
     })
   })
 
@@ -152,6 +273,15 @@ describe('graphStore', () => {
       getStore().toggleFilter('character')
       expect(getStore().nodeFilter.place).toBe(true)
       expect(getStore().nodeFilter.faction).toBe(true)
+    })
+  })
+
+  describe('toggleArchived', () => {
+    it('shows archived entities only when explicitly enabled', () => {
+      getStore().toggleArchived()
+      expect(getStore().showArchived).toBe(true)
+      getStore().toggleArchived()
+      expect(getStore().showArchived).toBe(false)
     })
   })
 })

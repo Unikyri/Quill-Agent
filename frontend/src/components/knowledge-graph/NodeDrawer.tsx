@@ -1,6 +1,6 @@
 import { useGraphStore } from '../../stores/graphStore'
 import styles from './GraphCanvas.module.css'
-import { NODE_TYPE_META } from './nodeTypeMeta'
+import { ENTITY_TYPE_META } from '../../lib/entityTypes'
 
 export default function NodeDrawer() {
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
@@ -12,7 +12,7 @@ export default function NodeDrawer() {
   const node = nodes.find((n) => n.id === selectedNodeId)
   if (!node) return null
 
-  const meta = NODE_TYPE_META[node.type] || NODE_TYPE_META.character
+  const meta = ENTITY_TYPE_META[node.type] || ENTITY_TYPE_META.character
   const description = (node.data.description as string) || ''
   const relevanceScore = node.data.relevanceScore as number | undefined
   const status = node.data.status as string | undefined
@@ -26,7 +26,7 @@ export default function NodeDrawer() {
         </button>
       </div>
       <span className={styles.drawerType} style={{ borderLeft: `3px solid ${meta.color}` }}>
-        <span className="glyph">{meta.icon}</span> {meta.label}
+        <span className="glyph">{meta.glyph}</span> {meta.label}
       </span>
       {status && (
         <div className={styles.drawerField}>

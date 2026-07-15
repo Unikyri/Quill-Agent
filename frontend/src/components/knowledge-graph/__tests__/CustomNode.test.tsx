@@ -80,4 +80,29 @@ describe('CustomNode', () => {
     const { container } = renderNode('character', '')
     expect(container.textContent).toContain('Untitled')
   })
+
+  it('emphasizes high-relevance nodes through scale and opacity', () => {
+    const { container } = render(
+      <ReactFlowProvider>
+        <CustomNode
+          id="test-1"
+          type="custom"
+          data={{ type: 'character', label: 'Alice', relevanceScore: 1 }}
+          xPos={0}
+          yPos={0}
+          zIndex={0}
+          selected={false}
+          dragging={false}
+          isConnectable={true}
+          sourcePosition={Position.Bottom}
+          targetPosition={Position.Top}
+        />
+      </ReactFlowProvider>
+    )
+
+    const node = container.firstElementChild as HTMLElement
+    expect(node.dataset.relevance).toBe('1.00')
+    expect(node.style.opacity).toBe('1')
+    expect(node.style.getPropertyValue('--node-scale')).toBe('1.12')
+  })
 })

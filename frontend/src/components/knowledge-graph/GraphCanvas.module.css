@@ -111,7 +111,9 @@
   min-width: 100px;
   box-shadow: 0 2px 8px rgba(43, 38, 32, 0.08);
   cursor: pointer;
-  transition: box-shadow 0.2s;
+  transform: scale(var(--node-scale, 1));
+  transform-origin: center;
+  transition: box-shadow 0.2s, opacity 0.2s, transform 0.2s;
 }
 
 .customNode:hover {

@@ -1,10 +1,11 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
-import { parseVertexRaw, ENTITY_TYPES } from '../lib/graphParse'
+import { parseVertexRaw } from '../lib/graphParse'
+import { ENTITY_TYPES, type EntityType } from '../lib/entityTypes'
 
 interface GraphNode {
   id: string
-  type: (typeof ENTITY_TYPES)[number]
+  type: EntityType
   position: { x: number; y: number }
   data: {
     label: string
@@ -28,28 +29,58 @@ interface GraphState {
   edges: GraphEdge[]
   selectedNodeId: string | null
   nodeFilter: Record<string, boolean> // { character: true, location: true, ... }
+  showArchived: boolean
   loading: boolean
   error: string | null
+  requestVersion: number
   _universeId: string | null
+  focalNodeId: string | null
+  breadcrumb: string[]
   fetchGraph: (universeId: string) => Promise<void>
   refresh: () => Promise<void>
+  focusNode: (id: string) => Promise<void>
+  goBack: () => Promise<void>
   selectNode: (id: string | null) => void
   toggleFilter: (type: string) => void
+  toggleArchived: () => void
 }
 
 const ALL_TYPES = ENTITY_TYPES as unknown as string[]
 
+function isCurrentRequest(
+  get: () => GraphState,
+  requestVersion: number,
+  universeId: string,
+  focalNodeId?: string,
+) {
+  const state = get()
+  return state.requestVersion === requestVersion
+    && state._universeId === universeId
+    && (focalNodeId === undefined || state.focalNodeId === focalNodeId)
+}
+
 // ponytail: shared node-mapping used by both the initial fetch and refresh,
 // avoided duplicating the raw-agtype parsing logic a third time.
-function mapNodes(rawNodes: any[]): GraphNode[] {
-  const total = rawNodes.length || 1
+function mapNodes(rawNodes: any[], focalNodeId: string): GraphNode[] {
+  const neighbors = rawNodes.filter((node: any) => (parseVertexRaw(String(node.properties?.raw || '')).entityId || node.id) !== focalNodeId)
+  const total = neighbors.length || 1
+  let neighborIndex = 0
   return rawNodes.map((n: any, i: number) => {
-    const angle = (2 * Math.PI * i) / total
-    const radius = Math.max(100, total * 30)
     const raw: string = n.properties?.raw || ''
     const v = parseVertexRaw(raw)
+    const id = v.entityId || n.id || String(i)
+    if (id === focalNodeId) {
+      return {
+        id,
+        type: v.type as GraphNode['type'],
+        position: { x: 0, y: 0 },
+        data: { label: v.name, relevanceScore: v.relevanceScore, status: v.status },
+      }
+    }
+    const angle = (2 * Math.PI * neighborIndex++) / total
+    const radius = 220
     return {
-      id: v.entityId || n.id || String(i),
+      id,
       type: v.type as GraphNode['type'],
       position: { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius },
       data: { label: v.name, relevanceScore: v.relevanceScore, status: v.status },
@@ -75,35 +106,65 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   edges: [],
   selectedNodeId: null,
   nodeFilter: Object.fromEntries(ALL_TYPES.map((t) => [t, true])),
+  showArchived: false,
   loading: false,
   error: null,
+  requestVersion: 0,
   _universeId: null,
+  focalNodeId: null,
+  breadcrumb: [],
 
   fetchGraph: async (universeId) => {
-    set({ loading: true, error: null, _universeId: universeId })
+    const requestVersion = get().requestVersion + 1
+    set({
+      loading: true,
+      error: null,
+      requestVersion,
+      _universeId: universeId,
+      focalNodeId: null,
+      selectedNodeId: null,
+      breadcrumb: [],
+    })
     try {
-      const { nodes: rawNodes, edges: rawEdges } = await api.getGraph(universeId)
-      // Transform backend {id, labels, properties} → frontend {id, type, position, data}
-      // ponytail: auto-layout with circle packing; no layout lib needed for hackathon
-      const nodes: GraphNode[] = mapNodes(rawNodes as any[])
+      let { entities } = await api.listEntities(universeId, { limit: '1', status: 'active' })
+      if (!isCurrentRequest(get, requestVersion, universeId)) return
+      if (entities.length === 0) {
+        ({ entities } = await api.listEntities(universeId, { limit: '1', status: 'archived' }))
+        if (!isCurrentRequest(get, requestVersion, universeId)) return
+      }
+      const focalNodeId = entities[0]?.id
+      if (!focalNodeId) {
+        if (isCurrentRequest(get, requestVersion, universeId)) {
+          set({ nodes: [], edges: [], focalNodeId: null, loading: false })
+        }
+        return
+      }
+      const { nodes: rawNodes, edges: rawEdges } = await api.getEntityNeighbors(focalNodeId, universeId, 2)
+      if (!isCurrentRequest(get, requestVersion, universeId)) return
+      const nodes: GraphNode[] = mapNodes(rawNodes as any[], focalNodeId)
       const edges: GraphEdge[] = (rawEdges as any[]).map((e: any) => ({
         id: e.id || `${e.source}-${e.target}`,
         source: extractEdgeSource(e),
         target: extractEdgeTarget(e),
         label: e.type || e.label || '',
       }))
-      set({ nodes, edges, loading: false })
+      set({ nodes, edges, focalNodeId, selectedNodeId: focalNodeId, loading: false })
     } catch (err) {
-      set({ error: (err as Error).message, loading: false })
+      if (isCurrentRequest(get, requestVersion, universeId)) {
+        set({ error: (err as Error).message, loading: false })
+      }
     }
   },
 
   refresh: async () => {
-    const { _universeId } = get()
-    if (_universeId) {
+    const { _universeId, focalNodeId } = get()
+    if (_universeId && focalNodeId) {
+      const requestVersion = get().requestVersion + 1
+      set({ requestVersion })
       try {
-        const { nodes: rawNodes, edges: rawEdges } = await api.getGraph(_universeId)
-        const nodes: GraphNode[] = mapNodes(rawNodes as any[])
+        const { nodes: rawNodes, edges: rawEdges } = await api.getEntityNeighbors(focalNodeId, _universeId, 2)
+        if (!isCurrentRequest(get, requestVersion, _universeId, focalNodeId)) return
+        const nodes: GraphNode[] = mapNodes(rawNodes as any[], focalNodeId)
         const edges: GraphEdge[] = (rawEdges as any[]).map((e: any) => ({
           id: e.id || `${e.source}-${e.target}`,
           source: extractEdgeSource(e),
@@ -112,9 +173,43 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         }))
         set({ nodes, edges, error: null })
       } catch (err) {
-        set({ error: (err as Error).message })
+        if (isCurrentRequest(get, requestVersion, _universeId, focalNodeId)) {
+          set({ error: (err as Error).message })
+        }
       }
     }
+  },
+
+  focusNode: async (id) => {
+    const { _universeId, focalNodeId, breadcrumb } = get()
+    if (!_universeId || id === focalNodeId) return
+    const requestVersion = get().requestVersion + 1
+    set({ loading: true, error: null, requestVersion })
+    try {
+      const { nodes: rawNodes, edges: rawEdges } = await api.getEntityNeighbors(id, _universeId, 2)
+      if (!isCurrentRequest(get, requestVersion, _universeId)) return
+      const nodes = mapNodes(rawNodes as any[], id)
+      const edges: GraphEdge[] = (rawEdges as any[]).map((e: any) => ({
+        id: e.id || `${e.source}-${e.target}`,
+        source: extractEdgeSource(e),
+        target: extractEdgeTarget(e),
+        label: e.type || e.label || '',
+      }))
+      set({ nodes, edges, focalNodeId: id, selectedNodeId: id, breadcrumb: focalNodeId ? [...breadcrumb, focalNodeId] : breadcrumb, loading: false })
+    } catch (err) {
+      if (isCurrentRequest(get, requestVersion, _universeId)) {
+        set({ error: (err as Error).message, loading: false })
+      }
+    }
+  },
+
+  goBack: async () => {
+    const { breadcrumb } = get()
+    const previous = breadcrumb[breadcrumb.length - 1]
+    if (!previous) return
+    set({ breadcrumb: breadcrumb.slice(0, -1) })
+    await get().focusNode(previous)
+    set({ breadcrumb: breadcrumb.slice(0, -1) })
   },
 
   selectNode: (id) => set({ selectedNodeId: id }),
@@ -123,4 +218,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const current = get().nodeFilter
     set({ nodeFilter: { ...current, [type]: !current[type] } })
   },
+
+  toggleArchived: () => set((state) => ({ showArchived: !state.showArchived })),
 }))

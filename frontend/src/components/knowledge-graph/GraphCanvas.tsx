@@ -10,7 +10,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css'
 import { useGraphStore } from '../../stores/graphStore'
 import CustomNode from './CustomNode'
-import { NODE_TYPE_META } from './nodeTypeMeta'
+import { ENTITY_TYPE_META } from '../../lib/entityTypes'
 import styles from './GraphCanvas.module.css'
 
 const nodeTypes: NodeTypes = { custom: CustomNode }
@@ -19,18 +19,21 @@ export default function GraphCanvas() {
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const nodeFilter = useGraphStore((s) => s.nodeFilter)
+  const showArchived = useGraphStore((s) => s.showArchived)
   const selectNode = useGraphStore((s) => s.selectNode)
+  const focusNode = useGraphStore((s) => s.focusNode)
 
   const visibleNodes: Node[] = useMemo(() => {
     return nodes
       .filter((n) => nodeFilter[n.type] !== false)
+      .filter((n) => showArchived || n.data.status !== 'archived')
       .map((n) => ({
         id: n.id,
         type: 'custom',
         position: n.position,
         data: { ...n.data, type: n.type },
       }))
-  }, [nodes, nodeFilter])
+  }, [nodes, nodeFilter, showArchived])
 
   const visibleEdges: Edge[] = useMemo(() => {
     const visibleIds = new Set(visibleNodes.map((n) => n.id))
@@ -47,8 +50,9 @@ export default function GraphCanvas() {
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       selectNode(node.id)
+      void focusNode(node.id)
     },
-    [selectNode]
+    [focusNode, selectNode]
   )
 
   const onPaneClick = useCallback(() => {
@@ -72,7 +76,7 @@ export default function GraphCanvas() {
         <MiniMap
           nodeColor={(n) => {
             const type = (n.data as { type?: string })?.type
-            return NODE_TYPE_META[type ?? '']?.color || '#6f6656'
+            return ENTITY_TYPE_META[type as keyof typeof ENTITY_TYPE_META]?.color || '#6f6656'
           }}
           maskColor="rgba(43,38,32,0.35)"
           className={styles.minimap}
