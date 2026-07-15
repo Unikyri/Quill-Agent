@@ -2,31 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useUniverseStore } from '../stores/universeStore'
+import { GENRE_OPTIONS, selectedValues } from '../lib/genres'
 import styles from './DashboardPage.module.css'
-
-const GENRES = [
-  { value: 'fantasy', label: 'Fantasy' },
-  { value: 'sci-fi', label: 'Sci-Fi' },
-  { value: 'mystery', label: 'Mystery' },
-  { value: 'romance', label: 'Romance' },
-  { value: 'horror', label: 'Horror' },
-  { value: 'non-fiction', label: 'Non-Fiction' },
-  { value: 'thriller', label: 'Thriller' },
-  { value: 'historical', label: 'Historical' },
-  { value: 'adventure', label: 'Adventure' },
-  { value: 'comedy', label: 'Comedy' },
-  { value: 'drama', label: 'Drama' },
-]
-
-const FORMATS = [
-  { value: 'novel', label: 'Novel' },
-  { value: 'short-story', label: 'Short Story' },
-  { value: 'screenplay', label: 'Screenplay' },
-  { value: 'poetry', label: 'Poetry' },
-  { value: 'essay', label: 'Essay' },
-  { value: 'article', label: 'Article' },
-  { value: 'graphic-novel', label: 'Graphic Novel' },
-]
 
 export default function DashboardPage() {
   const navigate = useNavigate()
@@ -34,8 +11,7 @@ export default function DashboardPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [newUniverseName, setNewUniverseName] = useState('')
   const [newUniverseDesc, setNewUniverseDesc] = useState('')
-  const [newUniverseGenre, setNewUniverseGenre] = useState('fantasy')
-  const [newUniverseFormat, setNewUniverseFormat] = useState('novel')
+  const [newUniverseGenres, setNewUniverseGenres] = useState<string[]>(['fantasy'])
   const [submitError, setSubmitError] = useState<string | null>(null)
   const location = useLocation()
   const isForcingNew = new URLSearchParams(location.search).get('new') === 'true'
@@ -65,8 +41,7 @@ export default function DashboardPage() {
       const { universe } = await api.createUniverse({
         name: newUniverseName,
         description: newUniverseDesc,
-        format: newUniverseFormat,
-        genre: newUniverseGenre,
+        genre_tags: newUniverseGenres,
       })
       await fetchUniverses()
       navigate(`/universe/${universe.id}`)
@@ -125,32 +100,18 @@ export default function DashboardPage() {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Genre</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Genres</label>
               <select
-                value={newUniverseGenre}
-                onChange={(e) => setNewUniverseGenre(e.target.value)}
+                multiple
+                value={newUniverseGenres}
+                onChange={(e) => setNewUniverseGenres(selectedValues(e.currentTarget))}
                 style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', color: 'var(--ink)', fontSize: 14, width: '100%' }}
               >
-                {GENRES.map((g) => (
+                {GENRE_OPTIONS.map((g) => (
                   <option key={g.value} value={g.value}>{g.label}</option>
                 ))}
               </select>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Format</label>
-              <select
-                value={newUniverseFormat}
-                onChange={(e) => setNewUniverseFormat(e.target.value)}
-                style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', color: 'var(--ink)', fontSize: 14, width: '100%' }}
-              >
-                {FORMATS.map((f) => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {submitError && <div className={styles.errorText} style={{ color: 'var(--danger)', fontSize: 13, textAlign: 'center' }}>{submitError}</div>}

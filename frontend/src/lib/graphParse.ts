@@ -19,10 +19,6 @@ export interface ParsedVertex {
   relevanceScore?: number
 }
 
-// Entity types the extraction pipeline actually produces (qwen_service.go prompt
-// + entity_service.go CreateNode label) — keep in sync with backend.
-export const ENTITY_TYPES = ['character', 'place', 'event', 'faction', 'world_rule', 'plot_arc'] as const
-
 export function parseVertexRaw(raw: string): ParsedVertex {
   const entityId = extractStr(raw, 'entity_id') || ''
   return {

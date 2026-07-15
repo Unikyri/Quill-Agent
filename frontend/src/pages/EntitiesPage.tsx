@@ -1,12 +1,12 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { parseVertexRaw } from '../lib/graphParse'
-import { NODE_TYPE_META } from '../components/knowledge-graph/nodeTypeMeta'
+import { ENTITY_TYPES, ENTITY_TYPE_META, type EntityType } from '../lib/entityTypes'
 import styles from './EntitiesPage.module.css'
 
 interface EntitySummary {
-  id: string; name: string; type: string
+  id: string; name: string; type: string; aliases?: string[]
 }
 
 interface Entity {
@@ -19,9 +19,14 @@ interface RelatedEntity {
   id: string; name: string; type: string; relation?: string
 }
 
-const TYPE_FILTERS = ['All', 'character', 'place', 'object', 'faction', 'event', 'worldrule']
-
 function getInitial(name: string) { return (name || '?').charAt(0).toUpperCase() }
+
+const ENTITY_PAGE_SIZE = 100
+const TYPE_FILTERS = ['All', ...ENTITY_TYPES] as const
+
+function emptyTypeCounts(): Record<EntityType, number> {
+  return Object.fromEntries(ENTITY_TYPES.map((type) => [type, 0])) as Record<EntityType, number>
+}
 
 // ── Entity detail panel ──────────────────────────────────────────────────────
 function EntityDetail({ entityId, universeId }: { entityId: string; universeId: string }) {
@@ -52,7 +57,7 @@ function EntityDetail({ entityId, universeId }: { entityId: string; universeId: 
   if (error) return <p className={styles.loadingText} style={{ color: 'var(--danger)' }}>Error: {error}</p>
   if (!entity) return null
 
-  const meta = NODE_TYPE_META[entity.type] || NODE_TYPE_META.character
+  const meta = ENTITY_TYPE_META[entity.type as keyof typeof ENTITY_TYPE_META] || ENTITY_TYPE_META.character
   const relevancePct = Math.min(100, Math.round((entity.relevance_score ?? 0) * 100))
   const properties = entity.properties || {}
   const propEntries = Object.entries(properties).filter(([, v]) => v !== null && v !== undefined)
@@ -140,7 +145,7 @@ function EntityDetail({ entityId, universeId }: { entityId: string; universeId: 
               >
                 {r.name}
                 <span style={{ color: 'var(--muted-3)', marginLeft: 4, fontSize: 10 }}>
-                  ({NODE_TYPE_META[r.type]?.label || r.type})
+                  ({ENTITY_TYPE_META[r.type as keyof typeof ENTITY_TYPE_META]?.label || r.type})
                 </span>
               </span>
             ))}
@@ -158,30 +163,78 @@ export default function EntitiesPage() {
 
   const [entities, setEntities] = useState<EntitySummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [filteredTotal, setFilteredTotal] = useState(0)
+  const [countsByType, setCountsByType] = useState<Record<EntityType, number>>(emptyTypeCounts)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('All')
   const [selectedId, setSelectedId] = useState<string | null>(paramEntityId || null)
+  const queryKey = `${universeId ?? ''}\u0000${filter}\u0000${search.trim()}`
+  const activeQueryKey = useRef(queryKey)
+  activeQueryKey.current = queryKey
 
   useEffect(() => {
     if (!universeId) return
+    let cancelled = false
+    setEntities([])
+    setFilteredTotal(0)
+    setCountsByType(emptyTypeCounts())
     setLoading(true)
-    api.listEntities(universeId, { limit: '200' })
-      .then((res) => { setEntities(res.entities || []); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [universeId])
+    setLoadingMore(false)
+
+    const params: Record<string, string> = { limit: String(ENTITY_PAGE_SIZE), page: '1' }
+    if (filter !== 'All') params.type = filter
+    if (search.trim()) params.search = search.trim()
+
+    void api.listEntities(universeId, params)
+      .then((res) => {
+        if (cancelled) return
+        const nextEntities = res.entities || []
+        setEntities(nextEntities)
+        setFilteredTotal(res.pagination?.total ?? nextEntities.length)
+        setCountsByType({ ...emptyTypeCounts(), ...(res.counts_by_type || {}) })
+      })
+      .catch(() => {
+        if (!cancelled) setEntities([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [universeId, filter, search])
+
+  const loadMore = async () => {
+    if (!universeId || loadingMore) return
+    const requestQueryKey = queryKey
+    setLoadingMore(true)
+
+    const params: Record<string, string> = {
+      limit: String(ENTITY_PAGE_SIZE),
+      page: String(Math.floor(entities.length / ENTITY_PAGE_SIZE) + 1),
+    }
+    if (filter !== 'All') params.type = filter
+    if (search.trim()) params.search = search.trim()
+
+    try {
+      const res = await api.listEntities(universeId, params)
+      if (activeQueryKey.current !== requestQueryKey) return
+      setEntities((current) => [...current, ...(res.entities || [])])
+      setFilteredTotal(res.pagination?.total ?? filteredTotal)
+    } finally {
+      if (activeQueryKey.current === requestQueryKey) setLoadingMore(false)
+    }
+  }
 
   // Sync URL param
   useEffect(() => {
     if (paramEntityId && paramEntityId !== selectedId) setSelectedId(paramEntityId)
   }, [paramEntityId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = useMemo(() => {
-    return entities.filter((e) => {
-      if (filter !== 'All' && e.type !== filter) return false
-      if (search && !e.name.toLowerCase().includes(search.toLowerCase())) return false
-      return true
-    })
-  }, [entities, filter, search])
+  const allEntityCount = useMemo(
+    () => Object.values(countsByType).reduce((sum, count) => sum + count, 0),
+    [countsByType],
+  )
 
   const handleSelect = (id: string) => {
     setSelectedId(id)
@@ -202,13 +255,15 @@ export default function EntitiesPage() {
         </div>
 
         <div className={styles.filterChips}>
-          {TYPE_FILTERS.slice(0, 4).map((f) => (
+          {TYPE_FILTERS.map((f) => (
             <button
               key={f}
               className={`${styles.filterChip} ${filter === f ? styles.filterChipActive : ''}`}
               onClick={() => setFilter(f)}
             >
-              {f === 'All' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1) + 's'}
+              {f === 'All'
+                ? `All (${allEntityCount})`
+                : `${ENTITY_TYPE_META[f].label}s (${countsByType[f]})`}
             </button>
           ))}
         </div>
@@ -224,14 +279,15 @@ export default function EntitiesPage() {
                 </div>
               </div>
             ))
-          ) : filtered.length === 0 ? (
+          ) : entities.length === 0 ? (
             <p style={{ padding: 16, fontSize: 12.5, color: 'var(--muted)', textAlign: 'center', fontStyle: 'italic' }}>
               No entities found.
             </p>
           ) : (
-            filtered.map((e) => {
-              const meta = NODE_TYPE_META[e.type] || NODE_TYPE_META.character
-              return (
+            <>
+              {entities.map((e) => {
+                const meta = ENTITY_TYPE_META[e.type as keyof typeof ENTITY_TYPE_META] || ENTITY_TYPE_META.character
+                return (
                 <div
                   key={e.id}
                   className={`${styles.entityListItem} ${selectedId === e.id ? styles.entityListItemActive : ''}`}
@@ -249,8 +305,14 @@ export default function EntitiesPage() {
                     </div>
                   </div>
                 </div>
-              )
-            })
+                )
+              })}
+              {entities.length < filteredTotal && (
+                <button className={styles.loadMoreButton} onClick={() => void loadMore()} disabled={loadingMore}>
+                  {loadingMore ? 'Loading…' : `Load more (${entities.length} of ${filteredTotal})`}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

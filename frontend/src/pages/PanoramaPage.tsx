@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { UniverseContext } from '../contexts/UniverseContext'
 import { api } from '../lib/api'
-import { NODE_TYPE_META } from '../components/knowledge-graph/nodeTypeMeta'
+import { ENTITY_TYPE_META } from '../lib/entityTypes'
 import styles from './PanoramaPage.module.css'
 
 interface EntitySummary { id: string; name: string; type: string }
@@ -155,7 +155,7 @@ export default function PanoramaPage() {
             ) : (
               <div className={styles.entityGrid}>
                 {recentEntities.map((entity) => {
-                  const meta = NODE_TYPE_META[entity.type] || NODE_TYPE_META.character
+                  const meta = ENTITY_TYPE_META[entity.type as keyof typeof ENTITY_TYPE_META] || ENTITY_TYPE_META.character
                   return (
                     <div
                       key={entity.id}

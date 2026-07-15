@@ -1,7 +1,7 @@
 import { createContext } from 'react'
 
 export interface UniverseContextValue {
-  universe: { id: string; name: string; genre: string; format: string; description?: string } | null
+  universe: { id: string; name: string; genre_tags?: string[]; genre?: string; description?: string } | null
   works: { id: string; title: string; type: string; order_index: number }[]
   refetchWorks: () => Promise<void>
 }

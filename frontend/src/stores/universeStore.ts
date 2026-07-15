@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
 
-interface Universe { id: string; name: string; genre: string; format: string; description?: string }
+interface Universe { id: string; name: string; genre_tags?: string[]; genre?: string; description?: string }
 interface Work { id: string; title: string; type: string; order_index: number }
 interface Chapter { id: string; title: string; order_index: number; word_count: number }
 

@@ -46,7 +46,7 @@ describe('MemoryInspectorPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText(/no memory data yet/i)).toBeInTheDocument())
-    expect(screen.getByText(/no budget data yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/run a search above/i)).toBeInTheDocument()
   })
 
   it('disables the decay control while a request is in flight', async () => {

@@ -4,31 +4,8 @@ import { useUniverseStore } from '../stores/universeStore'
 import { UniverseContext, type UniverseContextValue } from '../contexts/UniverseContext'
 import { useAuthStore } from '../stores/authStore'
 import { api } from '../lib/api'
+import { GENRE_OPTIONS, selectedValues } from '../lib/genres'
 import styles from './UniverseLayout.module.css'
-
-const GENRES = [
-  { value: 'fantasy', label: 'Fantasy' },
-  { value: 'sci-fi', label: 'Sci-Fi' },
-  { value: 'mystery', label: 'Mystery' },
-  { value: 'romance', label: 'Romance' },
-  { value: 'horror', label: 'Horror' },
-  { value: 'non-fiction', label: 'Non-Fiction' },
-  { value: 'thriller', label: 'Thriller' },
-  { value: 'historical', label: 'Historical' },
-  { value: 'adventure', label: 'Adventure' },
-  { value: 'comedy', label: 'Comedy' },
-  { value: 'drama', label: 'Drama' },
-]
-
-const FORMATS = [
-  { value: 'novel', label: 'Novel' },
-  { value: 'short-story', label: 'Short Story' },
-  { value: 'screenplay', label: 'Screenplay' },
-  { value: 'poetry', label: 'Poetry' },
-  { value: 'essay', label: 'Essay' },
-  { value: 'article', label: 'Article' },
-  { value: 'graphic-novel', label: 'Graphic Novel' },
-]
 
 const TABS = [
   { to: 'panorama', label: 'Panorama', glyph: '◇' },
@@ -45,6 +22,10 @@ const TABS = [
 
 // Pages that need the content area to have no scroll (full-bleed: Editor, Graph)
 const FULL_BLEED_ROUTES = ['editor', 'graph']
+
+function genreSummary(universe?: { genre_tags?: string[]; genre?: string } | null) {
+  return universe?.genre_tags?.join(' · ') || universe?.genre || 'Uncategorized'
+}
 
 export default function UniverseLayout() {
   const { universeId } = useParams<{ universeId: string }>()
@@ -69,16 +50,14 @@ export default function UniverseLayout() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createDesc, setCreateDesc] = useState('')
-  const [createGenre, setCreateGenre] = useState('fantasy')
-  const [createFormat, setCreateFormat] = useState('novel')
+  const [createGenres, setCreateGenres] = useState<string[]>(['fantasy'])
 
   // Edit Modal
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingUniverse, setEditingUniverse] = useState<any | null>(null)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
-  const [editGenre, setEditGenre] = useState('fantasy')
-  const [editFormat, setEditFormat] = useState('novel')
+  const [editGenres, setEditGenres] = useState<string[]>(['fantasy'])
 
   useEffect(() => {
     fetchUniverses()
@@ -98,8 +77,7 @@ export default function UniverseLayout() {
     setEditingUniverse(u)
     setEditName(u.name)
     setEditDesc(u.description || '')
-    setEditGenre(u.genre || 'fantasy')
-    setEditFormat(u.format || 'novel')
+    setEditGenres(u.genre_tags || (u.genre ? [u.genre] : []))
     setShowEditModal(true)
     setShowSwitcher(false)
   }
@@ -111,8 +89,7 @@ export default function UniverseLayout() {
       const { universe } = await api.updateUniverse(editingUniverse.id, {
         name: editName.trim(),
         description: editDesc,
-        genre: editGenre,
-        format: editFormat
+        genre_tags: editGenres,
       })
       if (ctx.universe?.id === editingUniverse.id) {
         setCtx((prev) => ({ ...prev, universe }))
@@ -146,15 +123,13 @@ export default function UniverseLayout() {
       const { universe } = await api.createUniverse({
         name: createName.trim(),
         description: createDesc,
-        genre: createGenre,
-        format: createFormat
+        genre_tags: createGenres,
       })
       await fetchUniverses()
       setShowCreateModal(false)
       setCreateName('')
       setCreateDesc('')
-      setCreateGenre('fantasy')
-      setCreateFormat('novel')
+      setCreateGenres(['fantasy'])
       navigate(`/universe/${universe.id}`)
     } catch (err) {
       alert((err as Error).message)
@@ -252,7 +227,7 @@ export default function UniverseLayout() {
                 <span className={styles.switcherInfo}>
                   <span className={styles.switcherName}>{ctx.universe?.name || 'Universe'}</span>
                   <span className={styles.switcherMeta}>
-                    {ctx.universe?.genre} · {entityCount} {entityCount === 1 ? 'entity' : 'entities'}
+                    {genreSummary(ctx.universe)} · {entityCount} {entityCount === 1 ? 'entity' : 'entities'}
                   </span>
                 </span>
                 <span className={`${styles.switcherCaret} glyph`}>▾</span>
@@ -273,7 +248,7 @@ export default function UniverseLayout() {
                           <span className={styles.dropdownAvatar}>{u.name.charAt(0).toUpperCase()}</span>
                           <span className={styles.dropdownInfo}>
                             <span className={styles.dropdownName}>{u.name}</span>
-                            <span className={styles.dropdownMeta}>{u.genre}</span>
+                            <span className={styles.dropdownMeta}>{genreSummary(u)}</span>
                           </span>
                         </div>
                         <div className={styles.dropdownActions}>
@@ -425,31 +400,18 @@ export default function UniverseLayout() {
                   rows={3}
                 />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Genre</label>
-                  <select
-                    className={styles.modalSelect}
-                    value={createGenre}
-                    onChange={(e) => setCreateGenre(e.target.value)}
-                  >
-                    {GENRES.map((g) => (
-                      <option key={g.value} value={g.value}>{g.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Format</label>
-                  <select
-                    className={styles.modalSelect}
-                    value={createFormat}
-                    onChange={(e) => setCreateFormat(e.target.value)}
-                  >
-                    {FORMATS.map((f) => (
-                      <option key={f.value} value={f.value}>{f.label}</option>
-                    ))}
-                  </select>
-                </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Genres</label>
+                <select
+                  className={styles.modalSelect}
+                  multiple
+                  value={createGenres}
+                  onChange={(e) => setCreateGenres(selectedValues(e.currentTarget))}
+                >
+                  {GENRE_OPTIONS.map((g) => (
+                    <option key={g.value} value={g.value}>{g.label}</option>
+                  ))}
+                </select>
               </div>
               <div className={styles.modalActions}>
                 <button type="button" className={styles.btnCancel} onClick={() => setShowCreateModal(false)}>Cancel</button>
@@ -490,31 +452,18 @@ export default function UniverseLayout() {
                   rows={3}
                 />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Genre</label>
-                  <select
-                    className={styles.modalSelect}
-                    value={editGenre}
-                    onChange={(e) => setEditGenre(e.target.value)}
-                  >
-                    {GENRES.map((g) => (
-                      <option key={g.value} value={g.value}>{g.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Format</label>
-                  <select
-                    className={styles.modalSelect}
-                    value={editFormat}
-                    onChange={(e) => setEditFormat(e.target.value)}
-                  >
-                    {FORMATS.map((f) => (
-                      <option key={f.value} value={f.value}>{f.label}</option>
-                    ))}
-                  </select>
-                </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Genres</label>
+                <select
+                  className={styles.modalSelect}
+                  multiple
+                  value={editGenres}
+                  onChange={(e) => setEditGenres(selectedValues(e.currentTarget))}
+                >
+                  {GENRE_OPTIONS.map((g) => (
+                    <option key={g.value} value={g.value}>{g.label}</option>
+                  ))}
+                </select>
               </div>
               <div className={styles.modalActions}>
                 <button type="button" className={styles.btnCancel} onClick={() => setShowEditModal(false)}>Cancel</button>

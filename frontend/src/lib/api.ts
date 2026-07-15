@@ -90,17 +90,15 @@ export const api = {
   // Entities
   listEntities: (universeId: string, params?: Record<string, string>) => {
     const query = params ? '?' + new URLSearchParams(params).toString() : ''
-    return request<{ entities: any[]; pagination: any }>(`/universes/${universeId}/entities${query}`)
+    return request<{ entities: any[]; counts_by_type: Record<string, number>; pagination: any }>(`/universes/${universeId}/entities${query}`)
   },
   getEntity: (id: string) => request<{ entity: any }>(`/entities/${id}`),
 
-  // Neighbors in the AGE graph, 1 hop out — used by EntityCardPage for
-  // Relationships/Factions (reuses the existing /graph endpoint's raw node shape).
-  getEntityNeighbors: (id: string, universeId: string) =>
+  getEntityNeighbors: (id: string, universeId: string, hops = 1) =>
     request<{
       nodes: Array<{ id: string; properties: Record<string, unknown> }>
       edges: Array<{ id: string; properties: Record<string, unknown> }>
-    }>(`/entities/${id}/neighbors?universe_id=${universeId}&hops=1`),
+    }>(`/entities/${id}/neighbors?universe_id=${universeId}&hops=${hops}`),
 
   // Health
   health: () => request<any>('/health'),

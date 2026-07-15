@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useWSStore, type WSStatus } from '../../stores/wsStore'
-import { NODE_TYPE_META } from '../knowledge-graph/nodeTypeMeta'
+import { ENTITY_TYPE_META } from '../../lib/entityTypes'
 import { api } from '../../lib/api'
 import styles from './ContextPanel.module.css'
 
@@ -196,7 +196,7 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
             ) : (
               <div className={styles.entityChips}>
                 {discoveredEntities.map((e) => {
-                  const meta = NODE_TYPE_META[e.type || ''] || NODE_TYPE_META.character
+                  const meta = ENTITY_TYPE_META[e.type as keyof typeof ENTITY_TYPE_META] || ENTITY_TYPE_META.character
                   return (
                     <span
                       key={e.id || e.name}

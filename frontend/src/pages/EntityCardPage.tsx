@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { parseVertexRaw } from '../lib/graphParse'
-import { NODE_TYPE_META } from '../components/knowledge-graph/nodeTypeMeta'
+import { ENTITY_TYPE_META } from '../lib/entityTypes'
 import styles from './EntityCardPage.module.css'
 
 // Matches backend models.Entity (backend/internal/models/models.go) — do not
@@ -86,7 +86,7 @@ export default function EntityCardPage() {
     )
   }
 
-  const meta = NODE_TYPE_META[entity?.type || ''] || NODE_TYPE_META.character
+  const meta = ENTITY_TYPE_META[entity?.type as keyof typeof ENTITY_TYPE_META] || ENTITY_TYPE_META.character
   const relevancePct = Math.round((entity?.relevance_score ?? 0) * 100)
   const relevanceSegments = 5
   const filledSegments = Math.round((relevancePct / 100) * relevanceSegments)
@@ -120,7 +120,7 @@ export default function EntityCardPage() {
             )}
           </div>
           <p className={styles.subtitle} style={{ color: meta.color }}>
-            <span className="glyph">{meta.icon}</span> {meta.label}
+            <span className="glyph">{meta.glyph}</span> {meta.label}
           </p>
 
           <p className={styles.description}>
@@ -199,7 +199,7 @@ export default function EntityCardPage() {
                     <span>
                       {rel.name}{' '}
                       <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>
-                        ({NODE_TYPE_META[rel.type]?.label || rel.type})
+                        ({ENTITY_TYPE_META[rel.type as keyof typeof ENTITY_TYPE_META]?.label || rel.type})
                       </span>
                     </span>
                   </div>

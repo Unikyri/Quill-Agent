@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, type KeyboardEvent } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import { WORK_FORMAT_OPTIONS } from '../lib/genres'
 import ImageUpload from '../components/shared/ImageUpload'
 import styles from './WorkPage.module.css'
 
@@ -125,6 +126,16 @@ export default function WorkPage() {
     }
   }
 
+  const saveType = async (type: string) => {
+    if (!work || type === work.type) return
+    setWork({ ...work, type })
+    try {
+      await api.updateWork(work.id, { type })
+    } catch {
+      fetchData()
+    }
+  }
+
   const startRenameChapter = (ch: Chapter) => {
     setRenamingChapterId(ch.id)
     setChapterTitleDraft(ch.title)
@@ -176,7 +187,11 @@ export default function WorkPage() {
           </div>
           <div className={styles.headerInfo}>
             <div className={styles.metaRow}>
-              <span className={styles.typePill}>{work?.type || 'Untitled'}</span>
+              <select className={styles.typePill} value={work?.type || 'novel'} onChange={(e) => void saveType(e.target.value)} aria-label="Work format">
+                {WORK_FORMAT_OPTIONS.map((format) => (
+                  <option key={format.value} value={format.value}>{format.label}</option>
+                ))}
+              </select>
               <span className={styles.metaText}>
                 {chapters.length} chapter{chapters.length === 1 ? '' : 's'} · {totalWords.toLocaleString()} words
               </span>

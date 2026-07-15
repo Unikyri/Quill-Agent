@@ -2,6 +2,7 @@ import { useContext, useState, useEffect, useCallback, type KeyboardEvent } from
 import { useNavigate, useParams } from 'react-router-dom'
 import { UniverseContext } from '../contexts/UniverseContext'
 import { api } from '../lib/api'
+import { WORK_FORMAT_OPTIONS } from '../lib/genres'
 import ImageUpload from '../components/shared/ImageUpload'
 import styles from './UniverseWorksTab.module.css'
 
@@ -97,6 +98,12 @@ function WorkDetail({ workId, universeId, onBack }: { workId: string; universeId
     try { await api.updateWork(work.id, { synopsis }) } catch { fetchData() }
   }
 
+  const saveType = async (type: string) => {
+    if (!work || type === work.type) return
+    setWork({ ...work, type })
+    try { await api.updateWork(work.id, { type }) } catch { fetchData() }
+  }
+
   const saveChapterTitle = async (chId: string) => {
     const title = chapterTitleDraft.trim()
     setRenamingChapterId(null)
@@ -132,7 +139,11 @@ function WorkDetail({ workId, universeId, onBack }: { workId: string; universeId
         </div>
         <div className={styles.headerInfo}>
           <div className={styles.metaRow}>
-            <span className={styles.typePill}>{work?.type || 'Work'}</span>
+            <select className={styles.typePill} value={work?.type || 'novel'} onChange={(e) => void saveType(e.target.value)} aria-label="Work format">
+              {WORK_FORMAT_OPTIONS.map((format) => (
+                <option key={format.value} value={format.value}>{format.label}</option>
+              ))}
+            </select>
             <span className={styles.metaText}>
               {chapters.length} chapter{chapters.length !== 1 ? 's' : ''} · {totalWords.toLocaleString()} words
             </span>
@@ -355,11 +366,9 @@ export default function UniverseWorksTab() {
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             />
             <select className={styles.formSelect} value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="novel">Novel</option>
-              <option value="short-story">Short Story</option>
-              <option value="screenplay">Screenplay</option>
-              <option value="comic">Comic</option>
-              <option value="interactive">Interactive</option>
+              {WORK_FORMAT_OPTIONS.map((format) => (
+                <option key={format.value} value={format.value}>{format.label}</option>
+              ))}
             </select>
           </div>
           <input
