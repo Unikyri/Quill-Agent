@@ -47,6 +47,30 @@
   flex-shrink: 0;
 }
 
+.analysisStatusList {
+  display: grid;
+  gap: 1px;
+  border-bottom: 1px solid var(--line);
+}
+
+.analysisStatus {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 5px 14px;
+  background: var(--bg-rail);
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11px;
+}
+
+.analysisStatus[data-phase='analyzing'], .analysisStatus[data-phase='submitted'] { color: var(--teal); }
+.analysisStatus[data-phase='done'] { color: var(--success-2); }
+.analysisStatus[data-phase='failed'] { color: var(--danger); }
+.analysisStatusGlyph { font-weight: 700; }
+.analysisStatusReason { color: var(--muted); }
+
 /* Prose content area */
 .editorContent {
   flex: 1;

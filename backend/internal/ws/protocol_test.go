@@ -40,10 +40,12 @@ func TestWSMessageRoundTrip(t *testing.T) {
 	workID := uuid.New()
 	universeID := uuid.New()
 	submitPayload := models.ParagraphSubmitPayload{
-		WorkID:     workID,
-		ChapterID:  paraID,
-		UniverseID: universeID,
-		Text:       "The quick brown fox jumped over the lazy dog.",
+		SubmissionID: "submission-1",
+		ParagraphRef: "chapter:12",
+		WorkID:       workID,
+		ChapterID:    paraID,
+		UniverseID:   universeID,
+		Text:         "The quick brown fox jumped over the lazy dog.",
 	}
 	submitBytes, _ := json.Marshal(submitPayload)
 	submitMsg := WSMessage{Type: "paragraph_submit", Payload: submitBytes}
@@ -71,6 +73,9 @@ func TestWSMessageRoundTrip(t *testing.T) {
 	if recovered.WorkID != workID {
 		t.Errorf("recovered WorkID mismatch")
 	}
+	if recovered.SubmissionID != "submission-1" || recovered.ParagraphRef != "chapter:12" {
+		t.Errorf("submission correlation fields were not preserved: %+v", recovered)
+	}
 }
 
 // TestAllMessageTypeConstants verifies all required WS message type constants exist.
@@ -91,6 +96,7 @@ func TestAllMessageTypeConstants(t *testing.T) {
 	response := []struct{ name, val string }{
 		{"TypeAuthOK", TypeAuthOK},
 		{"TypeAnalysisResult", TypeAnalysisResult},
+		{"TypeAnalysisFailed", TypeAnalysisFailed},
 		{"TypeContradictionAlert", TypeContradictionAlert},
 		{"TypeContextualRecall", TypeContextualRecall},
 		{"TypeEntityDiscovered", TypeEntityDiscovered},
@@ -150,8 +156,10 @@ func TestServerPayloadSerialization(t *testing.T) {
 	// analysis_result
 	uid := uuid.New()
 	arPayload := models.AnalysisResultPayload{
-		WorkID:    uid,
-		ChapterID: uid,
+		SubmissionID: "submission-1",
+		ParagraphRef: "chapter:12",
+		WorkID:       uid,
+		ChapterID:    uid,
 		Entities: []models.EntityBrief{
 			{ID: uuid.New(), Name: "Alice", Type: "character"},
 		},
@@ -164,6 +172,20 @@ func TestServerPayloadSerialization(t *testing.T) {
 	}
 	if len(recovered.Entities) != 1 {
 		t.Errorf("expected 1 entity, got %d", len(recovered.Entities))
+	}
+	if recovered.SubmissionID != "submission-1" || recovered.ParagraphRef != "chapter:12" {
+		t.Errorf("analysis_result correlation fields were not preserved: %+v", recovered)
+	}
+
+	failureBytes, _ := json.Marshal(models.AnalysisFailedPayload{
+		SubmissionID: "submission-1", ParagraphRef: "chapter:12", WorkID: uid, ChapterID: uid, Reason: "service unavailable",
+	})
+	var failed models.AnalysisFailedPayload
+	if err := json.Unmarshal(failureBytes, &failed); err != nil {
+		t.Fatalf("round-trip analysis_failed: %v", err)
+	}
+	if failed.Reason != "service unavailable" {
+		t.Errorf("failure reason = %q", failed.Reason)
 	}
 
 	// contextual_recall

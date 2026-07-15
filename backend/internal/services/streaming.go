@@ -60,6 +60,7 @@ type streamResponseFrame struct {
 // tool-call deltas are keyed by index, function.name arrives once, and
 // function.arguments arrives as concatenated string fragments.
 func (s *QwenService) ChatCompletionStream(ctx context.Context, payload QwenRequest) (<-chan StreamChunk, error) {
+	payload = s.normalizeRequestMessages(payload)
 	payload.Stream = true
 
 	body, err := json.Marshal(payload)

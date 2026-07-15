@@ -17,7 +17,7 @@ import (
 // ParagraphSubmitter is the interface that Hub uses to submit paragraphs
 // for analysis. AnalysisService satisfies this interface.
 type ParagraphSubmitter interface {
-	SubmitParagraph(ctx context.Context, workID, chapterID, universeID, userID uuid.UUID, text string) error
+	SubmitParagraph(ctx context.Context, submissionID, paragraphRef string, workID, chapterID, universeID, userID uuid.UUID, text string) error
 }
 
 // RecallRequester is the interface that Hub uses to fetch contextual recall
@@ -264,24 +264,42 @@ func (h *Hub) heartbeat(conn *Conn) {
 // handleParagraphSubmit processes a paragraph_submit message.
 // Delegates to the ParagraphSubmitter interface (backed by AnalysisService).
 func (h *Hub) handleParagraphSubmit(userID uuid.UUID, msg WSMessage) {
-	var payload struct {
-		WorkID     uuid.UUID `json:"work_id"`
-		ChapterID  uuid.UUID `json:"chapter_id"`
-		UniverseID uuid.UUID `json:"universe_id"`
-		Text       string    `json:"text"`
-	}
+	var payload models.ParagraphSubmitPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		log.Printf("[ws] parse paragraph_submit: %v", err)
+		return
+	}
+	if payload.SubmissionID == "" || payload.ParagraphRef == "" || payload.WorkID == uuid.Nil || payload.ChapterID == uuid.Nil || payload.UniverseID == uuid.Nil || payload.Text == "" {
+		h.sendAnalysisFailure(userID, payload, "invalid paragraph submission")
 		return
 	}
 
 	if h.submitter == nil {
 		log.Printf("[ws] paragraph_submit: no submitter configured")
+		h.sendAnalysisFailure(userID, payload, "analysis service is unavailable")
 		return
 	}
 
-	if err := h.submitter.SubmitParagraph(context.Background(), payload.WorkID, payload.ChapterID, payload.UniverseID, userID, payload.Text); err != nil {
+	if err := h.submitter.SubmitParagraph(context.Background(), payload.SubmissionID, payload.ParagraphRef, payload.WorkID, payload.ChapterID, payload.UniverseID, userID, payload.Text); err != nil {
 		log.Printf("[ws] submit paragraph: %v", err)
+		h.sendAnalysisFailure(userID, payload, "analysis could not be queued")
+	}
+}
+
+func (h *Hub) sendAnalysisFailure(userID uuid.UUID, submitted models.ParagraphSubmitPayload, reason string) {
+	msg, err := NewMessage(TypeAnalysisFailed, models.AnalysisFailedPayload{
+		SubmissionID: submitted.SubmissionID,
+		ParagraphRef: submitted.ParagraphRef,
+		WorkID:       submitted.WorkID,
+		ChapterID:    submitted.ChapterID,
+		Reason:       reason,
+	})
+	if err != nil {
+		log.Printf("[ws] marshal analysis_failed: %v", err)
+		return
+	}
+	if err := h.SendToUser(userID, msg); err != nil {
+		log.Printf("[ws] send analysis_failed: %v", err)
 	}
 }
 

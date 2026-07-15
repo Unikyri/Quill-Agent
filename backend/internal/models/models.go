@@ -260,10 +260,17 @@ type AuthInitPayload struct {
 }
 
 type ParagraphSubmitPayload struct {
-	WorkID     uuid.UUID `json:"work_id"`
-	ChapterID  uuid.UUID `json:"chapter_id"`
-	UniverseID uuid.UUID `json:"universe_id"`
-	Text       string    `json:"text"`
+	// SubmissionID correlates every server progress/terminal message with the
+	// exact client-side debounce that created it.
+	SubmissionID string `json:"submission_id"`
+	// ParagraphRef is a client-local reference captured at edit time. It is
+	// intentionally opaque to the backend; the editor uses it to render a
+	// status beside the paragraph that was actually edited.
+	ParagraphRef string    `json:"paragraph_ref"`
+	WorkID       uuid.UUID `json:"work_id"`
+	ChapterID    uuid.UUID `json:"chapter_id"`
+	UniverseID   uuid.UUID `json:"universe_id"`
+	Text         string    `json:"text"`
 }
 
 type RecallRequestPayload struct {
@@ -275,11 +282,24 @@ type RecallRequestPayload struct {
 // Server → Client payloads
 
 type AnalysisResultPayload struct {
+	SubmissionID   string          `json:"submission_id"`
+	ParagraphRef   string          `json:"paragraph_ref"`
 	WorkID         uuid.UUID       `json:"work_id"`
 	ChapterID      uuid.UUID       `json:"chapter_id"`
 	Entities       []EntityBrief   `json:"entities"`
 	Contradictions []Contradiction `json:"contradictions"`
 	PlotHoles      []PlotHole      `json:"plot_holes"`
+}
+
+// AnalysisFailedPayload is the terminal failure counterpart of
+// AnalysisResultPayload. A successfully accepted paragraph submission emits
+// exactly one of these two terminal payloads.
+type AnalysisFailedPayload struct {
+	SubmissionID string    `json:"submission_id"`
+	ParagraphRef string    `json:"paragraph_ref"`
+	WorkID       uuid.UUID `json:"work_id"`
+	ChapterID    uuid.UUID `json:"chapter_id"`
+	Reason       string    `json:"reason"`
 }
 
 type EntityBrief struct {
@@ -310,6 +330,8 @@ type GraphUpdatedPayload struct {
 // interface{} here (not a concrete services type) since models is a
 // lower-level package that services depends on, not the other way around.
 type AnalysisProgressPayload struct {
+	SubmissionID       string      `json:"submission_id"`
+	ParagraphRef       string      `json:"paragraph_ref"`
 	Stage              string      `json:"stage"`
 	ChapterID          uuid.UUID   `json:"chapter_id"`
 	EntityCount        *int        `json:"entity_count,omitempty"`

@@ -77,6 +77,7 @@ beforeEach(() => {
     ingestionProgress: {},
     pipeline: null,
     budget: null,
+    submissions: {},
   })
   vi.useFakeTimers()
 })
@@ -148,9 +149,49 @@ describe('wsStore', () => {
       expect(ws.sentMessages[1]).toContain('paragraph_submit')
     })
 
-    it('does not send when status is not open', () => {
-      getStore().send({ type: 'paragraph_submit', payload: { text: 'hello' } })
+    it('queues a paragraph submission while the socket is connecting and flushes it on open', () => {
+      getStore().connect('test-token')
+      const ws = MockWebSocket.instances[0]
+      getStore().send({
+        type: 'paragraph_submit',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', text: 'hello' },
+      })
+      expect(ws.sentMessages).toHaveLength(0)
+      expect(getStore().submissions['submission-1']?.phase).toBe('submitted')
+
+      ws.simulateOpen()
+      expect(ws.sentMessages).toHaveLength(2)
+      expect(JSON.parse(ws.sentMessages[1]).type).toBe('paragraph_submit')
+    })
+
+    it('queues a paragraph submission before connect rather than dropping it', () => {
+      getStore().send({
+        type: 'paragraph_submit',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', text: 'hello' },
+      })
       expect(MockWebSocket.instances.length).toBe(0)
+      expect(getStore().submissions['submission-1']?.phase).toBe('submitted')
+
+      getStore().connect('test-token')
+      const ws = MockWebSocket.instances[0]
+      ws.simulateOpen()
+      expect(JSON.parse(ws.sentMessages[1]).payload.submission_id).toBe('submission-1')
+    })
+
+    it('bounds the outbound queue and makes an overflow visible as failed', () => {
+      getStore().connect('test-token')
+      const ws = MockWebSocket.instances[0]
+      for (let i = 0; i < 51; i++) {
+        getStore().send({
+          type: 'paragraph_submit',
+          payload: { submission_id: `submission-${i}`, paragraph_ref: `chapter:${i}`, text: `paragraph ${i}` },
+        })
+      }
+      expect(getStore().submissions['submission-0']).toMatchObject({ phase: 'failed' })
+      ws.simulateOpen()
+      // auth_init plus the bounded queue of 50 paragraph submissions.
+      expect(ws.sentMessages).toHaveLength(51)
+      expect(JSON.parse(ws.sentMessages[1]).payload.submission_id).toBe('submission-1')
     })
   })
 
@@ -165,6 +206,48 @@ describe('wsStore', () => {
       ws.simulateMessage({ type: 'analysis_result', payload: { content: 'analysis' } })
       expect(getStore().analysisResults).toHaveLength(1)
       expect(getStore().analysisResults[0].content).toBe('analysis')
+    })
+
+    it('tracks a submission from progress to terminal result', () => {
+      const ws = MockWebSocket.instances[0]
+      getStore().send({
+        type: 'paragraph_submit',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', text: 'hello' },
+      })
+      ws.simulateMessage({
+        type: 'analysis_progress',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', stage: 'entities_extracted' },
+      })
+      expect(getStore().submissions['submission-1']?.phase).toBe('analyzing')
+
+      ws.simulateMessage({
+        type: 'analysis_result',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter' },
+      })
+      expect(getStore().submissions['submission-1']?.phase).toBe('done')
+    })
+
+    it('tracks analysis_failed as a visible terminal state', () => {
+      const ws = MockWebSocket.instances[0]
+      ws.simulateMessage({
+        type: 'analysis_failed',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', reason: 'backend stopped' },
+      })
+      expect(getStore().submissions['submission-1']).toMatchObject({ phase: 'failed', reason: 'backend stopped' })
+    })
+
+    it('marks an in-flight submission failed when the backend connection drops', () => {
+      const ws = MockWebSocket.instances[0]
+      getStore().send({
+        type: 'paragraph_submit',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', text: 'hello' },
+      })
+      ws.simulateMessage({
+        type: 'analysis_progress',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', stage: 'entities_extracted' },
+      })
+      ws.simulateClose()
+      expect(getStore().submissions['submission-1']).toMatchObject({ phase: 'failed' })
     })
 
     it('dispatches contradiction_alert to contradictions slice', () => {

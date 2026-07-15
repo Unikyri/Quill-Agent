@@ -107,10 +107,12 @@ func TestHubParagraphSubmitterInterface(t *testing.T) {
 	universeID := uuid.New()
 
 	payload, _ := json.Marshal(map[string]interface{}{
-		"work_id":     workID,
-		"chapter_id":  chapterID,
-		"universe_id": universeID,
-		"text":        "Test paragraph",
+		"submission_id": "submission-1",
+		"paragraph_ref": "chapter:12",
+		"work_id":       workID,
+		"chapter_id":    chapterID,
+		"universe_id":   universeID,
+		"text":          "Test paragraph",
 	})
 	msg := WSMessage{Type: TypeParagraphSubmit, Payload: payload}
 
@@ -131,6 +133,18 @@ func TestHubParagraphSubmitterInterface(t *testing.T) {
 	if mock.text != "Test paragraph" {
 		t.Errorf("text = %q, want %q", mock.text, "Test paragraph")
 	}
+	if mock.submissionID != "submission-1" || mock.paragraphRef != "chapter:12" {
+		t.Errorf("submission correlation = %q / %q", mock.submissionID, mock.paragraphRef)
+	}
+}
+
+func TestHubParagraphSubmitMalformedPayloadDoesNotPanic(t *testing.T) {
+	hub := NewHub(nil, &mockParagraphSubmitter{}, nil, nil)
+	msg := WSMessage{Type: TypeParagraphSubmit, Payload: json.RawMessage(`{"not":"a submission"}`)}
+	// The handler must reject malformed/invalid payloads without reaching the
+	// submitter or panicking. There is no registered connection in this unit
+	// test, so the best-effort failure send is expected to be logged only.
+	hub.handleParagraphSubmit(uuid.New(), msg)
 }
 
 // TestHubRecallRequesterInterface verifies the Hub accepts and calls a
@@ -241,13 +255,16 @@ func TestWSMessageTypeConstantsMatch(t *testing.T) {
 
 // mockParagraphSubmitter records calls to SubmitParagraph.
 type mockParagraphSubmitter struct {
-	called                     bool
+	called                        bool
+	submissionID, paragraphRef    string
 	workID, chapterID, universeID uuid.UUID
-	text                       string
+	text                          string
 }
 
-func (m *mockParagraphSubmitter) SubmitParagraph(ctx context.Context, workID, chapterID, universeID, userID uuid.UUID, text string) error {
+func (m *mockParagraphSubmitter) SubmitParagraph(ctx context.Context, submissionID, paragraphRef string, workID, chapterID, universeID, userID uuid.UUID, text string) error {
 	m.called = true
+	m.submissionID = submissionID
+	m.paragraphRef = paragraphRef
 	m.workID = workID
 	m.chapterID = chapterID
 	m.universeID = universeID

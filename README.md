@@ -106,6 +106,12 @@ TEST_DATABASE_URL=postgres://quill:quill_dev_password@localhost:5432/quill?sslmo
 # Frontend tests and build
 cd frontend && npm run test
 cd frontend && npm run build
+
+# Assembled, model-backed browser verification (requires QWEN_API_KEY).
+# This boots an isolated `quill-e2e` Compose project on 15432/18080/13001,
+# waits (at most two minutes) for health, runs Playwright, and removes only
+# that project's disposable database volume when it finishes.
+cd .. && QWEN_API_KEY=your_key make e2e
 ```
 
 ## Demo Path

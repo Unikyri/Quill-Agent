@@ -17,6 +17,7 @@ const (
 	TypeAuthOK             = "auth_ok"
 	TypeAuthError          = "auth_error"
 	TypeAnalysisResult     = "analysis_result"
+	TypeAnalysisFailed     = "analysis_failed"
 	TypeContradictionAlert = "contradiction_alert"
 	TypeContextualRecall   = "contextual_recall"
 	TypeEntityDiscovered   = "entity_discovered"

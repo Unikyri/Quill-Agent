@@ -5,7 +5,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Highlight from '@tiptap/extension-highlight'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
-import { useWSStore } from '../../stores/wsStore'
+import { useWSStore, type SubmissionLifecycle } from '../../stores/wsStore'
 import styles from './TipTapEditor.module.css'
 
 interface TipTapEditorProps {
@@ -123,9 +123,14 @@ export default function TipTapEditor({
   onContentChange,
 }: TipTapEditorProps) {
   const send = useWSStore((s) => s.send)
+  const submissions = useWSStore((s) => s.submissions)
   const submitTimerRef = useRef<ReturnType<typeof setTimeout>>()
-  const lastParagraphTextRef = useRef<string>('')
+  const lastParagraphTextByRef = useRef<Record<string, string>>({})
+  const submissionSequenceRef = useRef(0)
   const [fontSize, setFontSize] = useState(17)
+  const chapterSubmissions = Object.values(submissions)
+    .filter((submission) => submission.chapterId === chapterId)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
 
   const editor = useEditor({
     extensions: [
@@ -141,15 +146,25 @@ export default function TipTapEditor({
       const text = editor.getText()
       onContentChange?.(html, text)
 
-      // Debounced paragraph submit for live AI analysis
+      // Capture the changed block while the edit transaction is current. The
+      // cursor may move before the debounce expires, so resolving it later
+      // would submit a different paragraph.
+      const selectedParagraph = getParagraphAtSelection(editor)
+      const paragraph = selectedParagraph ? { ...selectedParagraph, ref: `${chapterId}:${selectedParagraph.ref}` } : null
+      if (!paragraph || !paragraph.text.trim()) return
+
+      // Debounced paragraph submit for live AI analysis.
       if (submitTimerRef.current) clearTimeout(submitTimerRef.current)
       submitTimerRef.current = setTimeout(() => {
-        const paragraph = getParagraphAtCursor(editor)
-        if (paragraph && paragraph.text.trim() && paragraph.text !== lastParagraphTextRef.current) {
-          lastParagraphTextRef.current = paragraph.text
+        if (paragraph.text !== lastParagraphTextByRef.current[paragraph.ref]) {
+          lastParagraphTextByRef.current[paragraph.ref] = paragraph.text
+          submissionSequenceRef.current += 1
+          const submissionId = createSubmissionId(submissionSequenceRef.current)
           send({
             type: 'paragraph_submit',
             payload: {
+              submission_id: submissionId,
+              paragraph_ref: paragraph.ref,
               work_id: workId,
               chapter_id: chapterId,
               universe_id: universeId,
@@ -179,6 +194,7 @@ export default function TipTapEditor({
   return (
     <div className={styles.wrapper}>
       <Toolbar editor={editor} fontSize={fontSize} setFontSize={setFontSize} />
+      {chapterSubmissions.length > 0 && <AnalysisStatusList submissions={chapterSubmissions} />}
       <div className={`${styles.editorContent} q-scroll`} style={{ fontSize: `${fontSize}px` }}>
         <EditorContent editor={editor} />
       </div>
@@ -186,15 +202,45 @@ export default function TipTapEditor({
   )
 }
 
-function getParagraphAtCursor(editor: Editor): { text: string } | null {
+function getParagraphAtSelection(editor: Editor): { text: string; ref: string } | null {
   const { from } = editor.state.selection
   const doc = editor.state.doc
   const resolved = doc.resolve(from)
-  let node = resolved.parent
-  while (node && !node.isBlock && resolved.depth > 0) {
-    const parentResolved = doc.resolve(resolved.before(resolved.depth))
-    node = parentResolved.parent
-  }
+  const node = resolved.parent
   if (!node || !node.isBlock) return null
-  return { text: node.textContent }
+  const start = typeof resolved.start === 'function' ? resolved.start(resolved.depth) : from
+  return { text: node.textContent, ref: `${start}` }
+}
+
+function createSubmissionId(sequence: number): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `submission-${Date.now()}-${sequence}`
+}
+
+function AnalysisStatusList({ submissions }: { submissions: SubmissionLifecycle[] }) {
+  return (
+    <div className={styles.analysisStatusList} aria-label="Paragraph analysis statuses">
+      {submissions.map((submission) => <AnalysisStatus key={submission.submissionId} submission={submission} />)}
+    </div>
+  )
+}
+
+function AnalysisStatus({ submission }: { submission: SubmissionLifecycle }) {
+  const label = submission.phase === 'submitted'
+    ? 'Queued for analysis'
+    : submission.phase === 'analyzing'
+      ? 'Analyzing paragraph'
+      : submission.phase === 'done'
+        ? 'Analysis complete'
+        : 'Analysis failed'
+  const glyph = submission.phase === 'done' ? '✓' : submission.phase === 'failed' ? '!' : '◌'
+  return (
+    <div className={styles.analysisStatus} data-phase={submission.phase} data-testid="analysis-submission-status" data-paragraph-ref={submission.paragraphRef} role="status">
+      <span className={styles.analysisStatusGlyph}>{glyph}</span>
+      <span>{label}</span>
+      {submission.phase === 'failed' && submission.reason && <span className={styles.analysisStatusReason}>{submission.reason}</span>}
+    </div>
+  )
 }

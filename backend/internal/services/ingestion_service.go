@@ -11,7 +11,9 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/google/uuid"
@@ -30,12 +32,27 @@ type ingestionChunk struct {
 	content string
 }
 
+const (
+	ingestionRelationshipTimeout     = 15 * time.Second
+	ingestionRelationshipCorpusLimit = 12_000
+	ingestionRelationshipEntityLimit = 40
+	ingestionFallbackEdgeLimit       = 100
+)
+
 // IngestionQwen is the minimal Qwen interface used by IngestionService.
 // QwenService satisfies this interface.
 type IngestionQwen interface {
 	ExtractEntities(ctx context.Context, text, universeContext string) (*ExtractedEntities, error)
+	AnalyzeRelationships(ctx context.Context, text string, entityNames []string) ([]map[string]interface{}, error)
 	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
 	GenerateEmbeddingBatch(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+// relationshipEdgeWriter keeps relationship persistence testable without
+// bypassing GraphRepo in production. GraphRepo remains the default writer and
+// therefore retains AGE search-path and Cypher identifier protections.
+type relationshipEdgeWriter interface {
+	CreateEdge(ctx context.Context, graphName, sourceEntityID, targetEntityID, relType string, properties map[string]interface{}) error
 }
 
 // IngestionService processes document uploads asynchronously:
@@ -48,8 +65,10 @@ type IngestionService struct {
 	entitySvc  *EntityService
 	vectorRepo *repositories.VectorRepo
 	graphRepo  *repositories.GraphRepo
-	qwenSvc    IngestionQwen
-	hub        AnalysisHub
+	// relationshipEdges is a test seam; nil uses graphRepo.
+	relationshipEdges relationshipEdgeWriter
+	qwenSvc           IngestionQwen
+	hub               AnalysisHub
 
 	// Post-ingest bounded analysis (D4) — all nil-safe, wired via
 	// SetPostIngestAnalysis. Unset means analysis is silently skipped.
@@ -272,6 +291,9 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 	anySucceeded := false
 	var lastErr error
 	var ingestedChapters []ingestedChapter
+	var relationshipCorpus strings.Builder
+	var relationshipEntities []ResolvedEntity
+	var relationshipChunks [][]ResolvedEntity
 
 	for i, ch := range chunks {
 		select {
@@ -366,6 +388,11 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 			}
 			count, resolved := s.resolveAndBuildGraph(ctx, universeID, extracted, mentionText)
 			entitiesTotal += count
+			relationshipCorpus.WriteString(truncateIngestionRelationshipCorpus(ch.content, relationshipCorpus.Len()))
+			relationshipEntities = append(relationshipEntities, resolved...)
+			if len(resolved) > 0 {
+				relationshipChunks = append(relationshipChunks, resolved)
+			}
 			if chapterID != uuid.Nil {
 				ingestedChapters = append(ingestedChapters, ingestedChapter{
 					ID:       chapterID,
@@ -386,6 +413,11 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 		return
 	}
 
+	// Relationship extraction is deliberately one bounded, best-effort pass for
+	// the whole manuscript. Calling the model per chunk made ingestion serially
+	// slow and exceeded the E2E budget on long documents.
+	s.enrichRelationships(ctx, universeID, relationshipCorpus.String(), relationshipEntities, relationshipChunks)
+
 	// Bounded post-ingest analysis (contradiction + plot-hole checks) runs
 	// before the job is marked completed, so the job honestly reports
 	// "running" until analysis ends. Best-effort/enrichment: never flips a
@@ -396,6 +428,231 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 	s.updateJobStatus(ctx, jobID, "completed", "")
 	s.updateProgress(ctx, jobID, len(chunks), len(chunks), entitiesTotal)
 	s.emitProgress(jobID, ownerID, "completed", len(chunks), len(chunks))
+}
+
+func (s *IngestionService) enrichRelationships(ctx context.Context, universeID uuid.UUID, corpus string, entities []ResolvedEntity, chunks [][]ResolvedEntity) {
+	relationshipCtx, cancelRelationships := context.WithTimeout(ctx, ingestionRelationshipTimeout)
+	persisted, err := s.persistRelationships(relationshipCtx, universeID, corpus, entities)
+	cancelRelationships()
+	if err != nil {
+		log.Printf("[ingestion] analyze relationships: %v", err)
+	}
+	if persisted > 0 {
+		return
+	}
+
+	// Model enrichment is optional. When it produces no usable edge (including
+	// timeout/error), preserve basic graph connectivity from deterministic
+	// canonical co-occurrence within each imported chunk.
+	if fallbackEdges, fallbackErr := s.persistCooccurrenceEdges(ctx, universeID, chunks); fallbackErr != nil {
+		log.Printf("[ingestion] create co-occurrence fallback edges: %v", fallbackErr)
+	} else if fallbackEdges > 0 {
+		log.Printf("[ingestion] created %d CO_OCCURS_WITH fallback edges", fallbackEdges)
+	}
+}
+
+func truncateIngestionRelationshipCorpus(chunk string, used int) string {
+	if used >= ingestionRelationshipCorpusLimit {
+		return ""
+	}
+	remaining := ingestionRelationshipCorpusLimit - used
+	prefix := ""
+	if used > 0 && chunk != "" {
+		prefix = "\n\n"
+		remaining -= len(prefix)
+		if remaining <= 0 {
+			return ""
+		}
+	}
+	if len(chunk) > remaining {
+		chunk = chunk[:remaining]
+	}
+	return prefix + chunk
+}
+
+// persistRelationships enriches the universe graph from relationships found
+// in one ingested chunk. GraphRepo owns identifier validation and AGE session
+// safety; an invalid model-supplied relationship is therefore logged and
+// skipped without failing the ingestion job.
+func (s *IngestionService) persistRelationships(ctx context.Context, universeID uuid.UUID, text string, resolved []ResolvedEntity) (int, error) {
+	edgeWriter := s.relationshipEdges
+	if edgeWriter == nil {
+		edgeWriter = s.graphRepo
+	}
+	if s.qwenSvc == nil || edgeWriter == nil || len(resolved) == 0 {
+		return 0, nil
+	}
+
+	entities := make([]models.Entity, 0, min(len(resolved), ingestionRelationshipEntityLimit))
+	entityNames := make([]string, 0, min(len(resolved), ingestionRelationshipEntityLimit))
+	seenEntityIDs := make(map[uuid.UUID]struct{}, len(resolved))
+	for _, item := range resolved {
+		if item.Entity.Name == "" || len(entityNames) >= ingestionRelationshipEntityLimit {
+			continue
+		}
+		if _, seen := seenEntityIDs[item.Entity.ID]; seen {
+			continue
+		}
+		seenEntityIDs[item.Entity.ID] = struct{}{}
+		entities = append(entities, item.Entity)
+		entityNames = append(entityNames, item.Entity.Name)
+	}
+	if len(entityNames) == 0 {
+		return 0, nil
+	}
+
+	relationships, err := s.qwenSvc.AnalyzeRelationships(ctx, text, entityNames)
+	if err != nil {
+		return 0, err
+	}
+
+	graphName := "universe_" + universeID.String()
+	persisted := 0
+	for _, relationship := range relationships {
+		sourceName, _ := relationship["source"].(string)
+		targetName, _ := relationship["target"].(string)
+		relationType, _ := relationship["type"].(string)
+		if sourceName == "" || targetName == "" || relationType == "" {
+			log.Printf("[ingestion] skip malformed relationship: source=%q target=%q type=%q", sourceName, targetName, relationType)
+			continue
+		}
+		source, sourceFound, sourceDiagnostic := resolveIngestionRelationshipEntity(sourceName, entities)
+		if !sourceFound {
+			log.Printf("[ingestion] skip relationship source %q: %s", sourceName, sourceDiagnostic)
+			continue
+		}
+		target, targetFound, targetDiagnostic := resolveIngestionRelationshipEntity(targetName, entities)
+		if !targetFound {
+			log.Printf("[ingestion] skip relationship target %q: %s", targetName, targetDiagnostic)
+			continue
+		}
+		if err := edgeWriter.CreateEdge(ctx, graphName, source.ID.String(), target.ID.String(), relationType, nil); err != nil {
+			log.Printf("[ingestion] create graph edge %q->%q (%q): %v", sourceName, targetName, relationType, err)
+			continue
+		}
+		persisted++
+	}
+	return persisted, nil
+}
+
+type ingestionEntityPair struct {
+	source models.Entity
+	target models.Entity
+}
+
+func (s *IngestionService) persistCooccurrenceEdges(ctx context.Context, universeID uuid.UUID, chunks [][]ResolvedEntity) (int, error) {
+	edgeWriter := s.relationshipEdges
+	if edgeWriter == nil {
+		edgeWriter = s.graphRepo
+	}
+	if edgeWriter == nil {
+		return 0, nil
+	}
+
+	pairs := make(map[string]ingestionEntityPair)
+	for _, chunk := range chunks {
+		if len(pairs) >= ingestionFallbackEdgeLimit {
+			break
+		}
+		unique := make(map[uuid.UUID]models.Entity, len(chunk))
+		for _, item := range chunk {
+			if item.Entity.ID != uuid.Nil {
+				unique[item.Entity.ID] = item.Entity
+			}
+		}
+		entities := make([]models.Entity, 0, len(unique))
+		for _, entity := range unique {
+			entities = append(entities, entity)
+		}
+		sort.Slice(entities, func(i, j int) bool { return entities[i].ID.String() < entities[j].ID.String() })
+		for i := 0; i < len(entities); i++ {
+			for j := i + 1; j < len(entities); j++ {
+				if len(pairs) >= ingestionFallbackEdgeLimit {
+					break
+				}
+				key := entities[i].ID.String() + ":" + entities[j].ID.String()
+				if _, exists := pairs[key]; exists {
+					continue
+				}
+				pairs[key] = ingestionEntityPair{source: entities[i], target: entities[j]}
+			}
+			if len(pairs) >= ingestionFallbackEdgeLimit {
+				break
+			}
+		}
+	}
+
+	keys := make([]string, 0, len(pairs))
+	for key := range pairs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	graphName := "universe_" + universeID.String()
+	persisted := 0
+	for _, key := range keys {
+		pair := pairs[key]
+		if err := edgeWriter.CreateEdge(ctx, graphName, pair.source.ID.String(), pair.target.ID.String(), "CO_OCCURS_WITH", nil); err != nil {
+			log.Printf("[ingestion] create CO_OCCURS_WITH edge %q->%q: %v", pair.source.Name, pair.target.Name, err)
+			continue
+		}
+		persisted++
+	}
+	return persisted, nil
+}
+
+// resolveIngestionRelationshipEntity maps a model-emitted name to exactly one
+// persisted entity. Exact canonical/alias matches win; otherwise a shortened
+// name may match a canonical name or alias only when its word prefix is unique.
+// Ambiguity is an intentional no-edge outcome rather than a guess.
+func resolveIngestionRelationshipEntity(name string, entities []models.Entity) (models.Entity, bool, string) {
+	query := strings.TrimSpace(name)
+	if query == "" {
+		return models.Entity{}, false, "empty entity name"
+	}
+
+	exact := matchingRelationshipEntities(query, entities, false)
+	if len(exact) == 1 {
+		return exact[0], true, ""
+	}
+	if len(exact) > 1 {
+		return models.Entity{}, false, fmt.Sprintf("ambiguous canonical or alias match (%d entities)", len(exact))
+	}
+
+	prefix := matchingRelationshipEntities(query, entities, true)
+	if len(prefix) == 1 {
+		return prefix[0], true, ""
+	}
+	if len(prefix) > 1 {
+		return models.Entity{}, false, fmt.Sprintf("ambiguous prefix match (%d entities)", len(prefix))
+	}
+	return models.Entity{}, false, "no canonical, alias, or unique prefix match"
+}
+
+func matchingRelationshipEntities(query string, entities []models.Entity, allowPrefix bool) []models.Entity {
+	matches := make([]models.Entity, 0, 1)
+	for _, entity := range entities {
+		candidateNames := append([]string{entity.Name}, entity.Aliases...)
+		for _, candidate := range candidateNames {
+			candidate = strings.TrimSpace(candidate)
+			exact := strings.EqualFold(query, candidate)
+			prefix := allowPrefix && hasRelationshipWordPrefix(query, candidate)
+			if exact || prefix {
+				matches = append(matches, entity)
+				break
+			}
+		}
+	}
+	return matches
+}
+
+func hasRelationshipWordPrefix(query, candidate string) bool {
+	queryWords := strings.Fields(query)
+	candidateWords := strings.Fields(candidate)
+	if len(queryWords) == 0 || len(queryWords) >= len(candidateWords) {
+		return false
+	}
+	return strings.EqualFold(strings.Join(queryWords, " "), strings.Join(candidateWords[:len(queryWords)], " "))
 }
 
 // createChapter wraps ChapterRepo.Create (which requires a transaction) in a

@@ -5,10 +5,11 @@ import TipTapEditor from '../TipTapEditor'
 // ── Mocks ───────────────────────────────────────────────────────────────
 
 const mockWSStoreSend = vi.fn()
+let mockSubmissions: Record<string, unknown> = {}
 
 vi.mock('../../../stores/wsStore', () => ({
   useWSStore: vi.fn((selector: (s: unknown) => unknown) => {
-    const state = { send: mockWSStoreSend }
+    const state = { send: mockWSStoreSend, submissions: mockSubmissions }
     return selector ? selector(state) : state
   }),
 }))
@@ -84,6 +85,7 @@ describe('TipTapEditor — paragraph submit on idle', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mockWSStoreSend.mockClear()
+    mockSubmissions = {}
     capturedOnUpdate = null
   })
 
@@ -119,15 +121,17 @@ describe('TipTapEditor — paragraph submit on idle', () => {
     vi.advanceTimersByTime(5000)
 
     expect(mockWSStoreSend).toHaveBeenCalledTimes(1)
-    expect(mockWSStoreSend).toHaveBeenCalledWith({
+    expect(mockWSStoreSend).toHaveBeenCalledWith(expect.objectContaining({
       type: 'paragraph_submit',
-      payload: {
+      payload: expect.objectContaining({
+        submission_id: expect.any(String),
+        paragraph_ref: 'ch-1:5',
         work_id: 'w-1',
         chapter_id: 'ch-1',
         universe_id: 'u-1',
         text: 'Hello world',
-      },
-    })
+      }),
+    }))
   })
 
   it('resets the timer on subsequent keystrokes (does not double-fire)', () => {
@@ -180,5 +184,40 @@ describe('TipTapEditor — paragraph submit on idle', () => {
         payload: expect.objectContaining({ text: 'Second paragraph' }),
       })
     )
+  })
+
+  it('submits the paragraph captured at edit time after the cursor moves', () => {
+    render(<TipTapEditor {...defaultProps} />)
+
+    const selection = { from: 5 }
+    const editor = createMockEditor('Paragraph A')
+    editor.state.selection = selection
+    ;(editor.state.doc.resolve as unknown as (position: number) => unknown) = (position: number) => ({
+      parent: { isBlock: true, textContent: position < 10 ? 'Paragraph A' : 'Paragraph B' },
+      depth: 1,
+      start: () => position,
+      before: () => 0,
+    })
+    if (!capturedOnUpdate) throw new Error('onUpdate not captured')
+    capturedOnUpdate({ editor })
+    // Moving into B after the transaction must not change the captured A.
+    selection.from = 20
+    vi.advanceTimersByTime(5000)
+
+    expect(mockWSStoreSend).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ text: 'Paragraph A', paragraph_ref: 'ch-1:5' }),
+    }))
+  })
+
+  it('renders a lifecycle status for every submission in the current paragraph set', () => {
+    mockSubmissions = {
+      'submission-a': { submissionId: 'submission-a', paragraphRef: 'ch-1:5', chapterId: 'ch-1', phase: 'analyzing', updatedAt: 2 },
+      'submission-b': { submissionId: 'submission-b', paragraphRef: 'ch-1:20', chapterId: 'ch-1', phase: 'failed', reason: 'Qwen unavailable', updatedAt: 1 },
+      'other-chapter': { submissionId: 'other-chapter', paragraphRef: 'ch-2:5', chapterId: 'ch-2', phase: 'done', updatedAt: 3 },
+    }
+    const { getAllByTestId } = render(<TipTapEditor {...defaultProps} />)
+    const statuses = getAllByTestId('analysis-submission-status')
+    expect(statuses).toHaveLength(2)
+    expect(statuses.map((status) => status.getAttribute('data-paragraph-ref'))).toEqual(['ch-1:5', 'ch-1:20'])
   })
 })

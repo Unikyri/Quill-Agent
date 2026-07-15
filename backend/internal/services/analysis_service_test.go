@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/quill/backend/internal/models"
 	"github.com/quill/backend/internal/repositories"
 	"github.com/quill/backend/internal/testutil"
+	"github.com/quill/backend/internal/ws"
 )
 
 // ── Unit tests (no DB required) ──
@@ -299,10 +302,10 @@ func TestExtractEntities_ReactivateCallsReactivate(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{
-		QwenBaseURL:           server.URL,
-		QwenAPIKey:            "test-key",
-		QwenMaxConcurrency:    1,
-		QwenTurboConcurrency:  1,
+		QwenBaseURL:          server.URL,
+		QwenAPIKey:           "test-key",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
 	}
 	qwenSvc := NewQwenService(cfg, nil)
 
@@ -361,10 +364,10 @@ func TestExtractEntities_ActiveEntityNoReactivate(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{
-		QwenBaseURL:           server.URL,
-		QwenAPIKey:            "test-key",
-		QwenMaxConcurrency:    1,
-		QwenTurboConcurrency:  1,
+		QwenBaseURL:          server.URL,
+		QwenAPIKey:           "test-key",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
 	}
 	qwenSvc := NewQwenService(cfg, nil)
 
@@ -455,8 +458,8 @@ func TestProcessJobSkipsDuplicateParagraph(t *testing.T) {
 		if i == 0 && result == nil {
 			t.Error("first processJob returned nil result, want a real result")
 		}
-		if i == 1 && result != nil {
-			t.Error("duplicate processJob returned non-nil result, want nil so nothing is broadcast")
+		if i == 1 && result == nil {
+			t.Error("duplicate processJob returned nil result; accepted submissions require a terminal result")
 		}
 	}
 
@@ -465,6 +468,119 @@ func TestProcessJobSkipsDuplicateParagraph(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("ExtractEntities HTTP calls = %d, want 1 (duplicate paragraph must be skipped)", calls)
 	}
+}
+
+func TestProcessJobPropagatesEntityExtractionFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Qwen unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	qwenSvc := NewQwenService(&config.Config{
+		QwenBaseURL:          server.URL,
+		QwenAPIKey:           "test-key",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
+	}, nil)
+	svc := NewAnalysisService(nil, &spyEntityResolvr{}, nil, nil, nil, nil, qwenSvc, nil, nil)
+	_, err := svc.processJob(context.Background(), analysisJob{
+		WorkID: uuid.New(), ChapterID: uuid.New(), UniverseID: uuid.New(), UserID: uuid.New(), Text: "Aster arrives.",
+		SubmissionID: "submission-1", ParagraphRef: "chapter:1",
+	})
+	if err == nil {
+		t.Fatal("processJob succeeded after Qwen entity extraction failed")
+	}
+	if !strings.Contains(err.Error(), "extract entities") {
+		t.Fatalf("error = %q, want extraction context", err)
+	}
+}
+
+func TestProcessJobReleasesFailedFingerprintForRetry(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			http.Error(w, "temporary Qwen error", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"characters\":[],\"places\":[],\"objects\":[],\"events\":[],\"factions\":[],\"world_rules\":[],\"plot_developments\":[]}"}}]}`))
+	}))
+	defer server.Close()
+	qwenSvc := NewQwenService(&config.Config{QwenBaseURL: server.URL, QwenAPIKey: "test-key", QwenMaxConcurrency: 1, QwenTurboConcurrency: 1}, nil)
+	svc := NewAnalysisService(nil, &spyEntityResolvr{}, nil, nil, nil, nil, qwenSvc, nil, nil)
+	job := analysisJob{WorkID: uuid.New(), ChapterID: uuid.New(), UniverseID: uuid.New(), UserID: uuid.New(), Text: "Retry me.", SubmissionID: "submission-1", ParagraphRef: "chapter:1"}
+	if _, err := svc.processJob(context.Background(), job); err == nil {
+		t.Fatal("first processJob succeeded despite Qwen failure")
+	}
+	if _, err := svc.processJob(context.Background(), job); err != nil {
+		t.Fatalf("retry processJob failed after transient error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("Qwen calls = %d, want 2; failed analysis must not remain deduplicated", calls)
+	}
+}
+
+func TestAnalysisServiceSubmitParagraphProcessesSameWorkInOrder(t *testing.T) {
+	svc := NewAnalysisService(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	processed := make(chan string, 2)
+	svc.processJobFn = func(_ context.Context, job analysisJob) (*AnalysisResult, error) {
+		processed <- job.Text
+		return &AnalysisResult{SubmissionID: job.SubmissionID, ParagraphRef: job.ParagraphRef, WorkID: job.WorkID, ChapterID: job.ChapterID}, nil
+	}
+	workID, chapterID, universeID, userID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if err := svc.SubmitParagraph(context.Background(), "submission-1", "chapter:1", workID, chapterID, universeID, userID, "first"); err != nil {
+		t.Fatalf("SubmitParagraph first: %v", err)
+	}
+	if err := svc.SubmitParagraph(context.Background(), "submission-2", "chapter:2", workID, chapterID, universeID, userID, "second"); err != nil {
+		t.Fatalf("SubmitParagraph second: %v", err)
+	}
+	defer svc.Shutdown()
+	for _, want := range []string{"first", "second"} {
+		select {
+		case got := <-processed:
+			if got != want {
+				t.Fatalf("processed out of order: got %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %q", want)
+		}
+	}
+}
+
+func TestAnalysisServiceWorkerEmitsTerminalFailure(t *testing.T) {
+	hub := &terminalRecordingHub{messages: make(chan models.WSMessage, 1)}
+	svc := NewAnalysisService(nil, nil, nil, nil, nil, nil, nil, hub, nil)
+	svc.processJobFn = func(context.Context, analysisJob) (*AnalysisResult, error) {
+		return nil, fmt.Errorf("simulated analyzer failure")
+	}
+	workID, chapterID, universeID, userID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if err := svc.SubmitParagraph(context.Background(), "submission-1", "chapter:1", workID, chapterID, universeID, userID, "paragraph"); err != nil {
+		t.Fatalf("SubmitParagraph: %v", err)
+	}
+	defer svc.Shutdown()
+	select {
+	case msg := <-hub.messages:
+		if msg.Type != ws.TypeAnalysisFailed {
+			t.Fatalf("terminal type = %q, want %q", msg.Type, ws.TypeAnalysisFailed)
+		}
+		var payload models.AnalysisFailedPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal failure payload: %v", err)
+		}
+		if payload.SubmissionID != "submission-1" || payload.ParagraphRef != "chapter:1" {
+			t.Fatalf("terminal correlation = %+v", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for analysis_failed")
+	}
+}
+
+type terminalRecordingHub struct{ messages chan models.WSMessage }
+
+func (h *terminalRecordingHub) SendToUser(_ uuid.UUID, msg models.WSMessage) error {
+	h.messages <- msg
+	return nil
 }
 
 // stageRecordingHub is a fake AnalysisHub that records every message sent,
@@ -501,7 +617,7 @@ func (h *stageRecordingHub) rawProgressPayloads() []json.RawMessage {
 func TestSendProgressNilHubNoop(t *testing.T) {
 	svc := NewAnalysisService(nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// Should not panic with a nil hub.
-	svc.sendProgress(uuid.New(), uuid.New(), "entities_extracted", nil)
+	svc.sendProgress(uuid.New(), uuid.New(), "submission-1", "chapter:12", "entities_extracted", nil)
 }
 
 // TestSendProgressSendsPayload verifies sendProgress builds and sends an
@@ -512,7 +628,7 @@ func TestSendProgressSendsPayload(t *testing.T) {
 
 	chapterID := uuid.New()
 	count := 3
-	svc.sendProgress(uuid.New(), chapterID, "entities_extracted", func(p *models.AnalysisProgressPayload) {
+	svc.sendProgress(uuid.New(), chapterID, "submission-1", "chapter:12", "entities_extracted", func(p *models.AnalysisProgressPayload) {
 		p.EntityCount = &count
 	})
 
@@ -521,7 +637,7 @@ func TestSendProgressSendsPayload(t *testing.T) {
 	}
 }
 
-// TestProcessJobEmitsProgressInPipelineOrder verifies the 5 real pipeline
+// TestProcessJobEmitsProgressInPipelineOrder verifies the lifecycle and pipeline
 // stages fire via sendProgress in the documented relative order, even with
 // all downstream dependencies nil (each stage's guard being unmet just means
 // its count/budget field stays empty — the stage itself still marks that the
@@ -544,6 +660,7 @@ func TestProcessJobEmitsProgressInPipelineOrder(t *testing.T) {
 	}
 
 	wantOrder := []string{
+		"analyzing",
 		"entities_extracted",
 		"checking_contradictions",
 		"contradictions_checked",

@@ -53,12 +53,44 @@ func (m *mockIngestionHub) popUserIDs() []uuid.UUID {
 
 // mockQwenForIngestion returns canned ExtractEntities and GenerateEmbedding results.
 type mockQwenForIngestion struct {
-	extractResult *ExtractedEntities
-	extractErr    error
+	extractResult         *ExtractedEntities
+	extractErr            error
+	relationships         []map[string]interface{}
+	relationshipErr       error
+	relationshipMu        sync.Mutex
+	relationshipCallCount int
+}
+
+type recordingRelationshipEdgeWriter struct {
+	edges []recordedRelationshipEdge
+}
+
+type recordedRelationshipEdge struct {
+	sourceID string
+	targetID string
+	relType  string
+}
+
+func (w *recordingRelationshipEdgeWriter) CreateEdge(_ context.Context, _ string, sourceID, targetID, relType string, _ map[string]interface{}) error {
+	w.edges = append(w.edges, recordedRelationshipEdge{sourceID: sourceID, targetID: targetID, relType: relType})
+	return nil
 }
 
 func (m *mockQwenForIngestion) ExtractEntities(ctx context.Context, text, categories string) (*ExtractedEntities, error) {
 	return m.extractResult, m.extractErr
+}
+
+func (m *mockQwenForIngestion) AnalyzeRelationships(ctx context.Context, text string, entityNames []string) ([]map[string]interface{}, error) {
+	m.relationshipMu.Lock()
+	defer m.relationshipMu.Unlock()
+	m.relationshipCallCount++
+	return m.relationships, m.relationshipErr
+}
+
+func (m *mockQwenForIngestion) relationshipCalls() int {
+	m.relationshipMu.Lock()
+	defer m.relationshipMu.Unlock()
+	return m.relationshipCallCount
 }
 
 func (m *mockQwenForIngestion) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
@@ -144,6 +176,274 @@ Frodo learns about the Ring.`
 	if !foundProgress {
 		t.Error("expected an ingestion_progress message")
 	}
+}
+
+func TestIngestionServicePersistsRelationshipEdge(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "020")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	graphRepo := repositories.NewGraphRepo(pool)
+	if err := graphRepo.CreateGraph(ctx, universe.ID.String()); err != nil {
+		t.Fatalf("create graph: %v", err)
+	}
+
+	source := svcCreateTestEntity(t, ctx, pool, universe.ID, "Mira", 0.8, "alive")
+	target := svcCreateTestEntity(t, ctx, pool, universe.ID, "Aurelia", 0.8, "active")
+	graphName := "universe_" + universe.ID.String()
+	for _, entity := range []models.Entity{source, target} {
+		if err := graphRepo.CreateNode(ctx, graphName, entity.Type, map[string]interface{}{
+			"entity_id": entity.ID.String(), "name": entity.Name, "status": entity.Status, "relevance_score": entity.RelevanceScore,
+		}); err != nil {
+			t.Fatalf("create graph node %s: %v", entity.Name, err)
+		}
+	}
+
+	qwen := &mockQwenForIngestion{relationships: []map[string]interface{}{
+		{"source": "Mira", "target": "Aurelia", "type": "LOCATED_AT"},
+	}}
+	svc := &IngestionService{graphRepo: graphRepo, qwenSvc: qwen}
+	if _, err := svc.persistRelationships(ctx, universe.ID, "Mira arrives at Aurelia.", []ResolvedEntity{{Entity: source}, {Entity: target}}); err != nil {
+		t.Fatalf("persistRelationships: %v", err)
+	}
+
+	neighbors, err := graphRepo.GetNeighbors(ctx, graphName, source.ID.String())
+	if err != nil {
+		t.Fatalf("get graph neighbors: %v", err)
+	}
+	for _, neighbor := range neighbors {
+		if neighbor.RelType == "LOCATED_AT" {
+			return
+		}
+	}
+	t.Fatalf("expected LOCATED_AT edge from %s, got neighbors %#v", source.Name, neighbors)
+}
+
+func TestResolveIngestionRelationshipEntity(t *testing.T) {
+	entities := []models.Entity{
+		{ID: uuid.New(), Name: "Mira Voss", Aliases: []string{"The Navigator"}},
+		{ID: uuid.New(), Name: "Aurelia Station"},
+	}
+	tests := []struct {
+		name       string
+		query      string
+		entities   []models.Entity
+		wantName   string
+		wantFound  bool
+		wantReason string
+	}{
+		{name: "canonical", query: "Mira Voss", entities: entities, wantName: "Mira Voss", wantFound: true},
+		{name: "case and space", query: "  mira voss  ", entities: entities, wantName: "Mira Voss", wantFound: true},
+		{name: "unique alias", query: "the navigator", entities: entities, wantName: "Mira Voss", wantFound: true},
+		{name: "unique shortened source", query: "Mira", entities: entities, wantName: "Mira Voss", wantFound: true},
+		{name: "unique shortened target", query: "Aurelia", entities: entities, wantName: "Aurelia Station", wantFound: true},
+		{name: "ambiguous shortened name", query: "Mira", entities: []models.Entity{{ID: uuid.New(), Name: "Mira Voss"}, {ID: uuid.New(), Name: "Mira Sol"}}, wantFound: false, wantReason: "ambiguous"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entity, found, reason := resolveIngestionRelationshipEntity(tc.query, tc.entities)
+			if found != tc.wantFound {
+				t.Fatalf("found = %v, want %v (reason: %s)", found, tc.wantFound, reason)
+			}
+			if tc.wantFound && entity.Name != tc.wantName {
+				t.Errorf("entity = %q, want %q", entity.Name, tc.wantName)
+			}
+			if tc.wantReason != "" && !strings.Contains(reason, tc.wantReason) {
+				t.Errorf("reason = %q, want containing %q", reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestPersistRelationshipsRejectsAmbiguousNamesWithoutCreatingEdge(t *testing.T) {
+	edgeWriter := &recordingRelationshipEdgeWriter{}
+	svc := &IngestionService{
+		qwenSvc: &mockQwenForIngestion{relationships: []map[string]interface{}{
+			{"source": "Mira", "target": "Aurelia", "type": "LOCATED_AT"},
+		}},
+		relationshipEdges: edgeWriter,
+	}
+	resolved := []ResolvedEntity{
+		{Entity: models.Entity{ID: uuid.New(), Name: "Mira Voss"}},
+		{Entity: models.Entity{ID: uuid.New(), Name: "Mira Sol"}},
+		{Entity: models.Entity{ID: uuid.New(), Name: "Aurelia Station"}},
+	}
+	if _, err := svc.persistRelationships(context.Background(), uuid.New(), "Mira arrives at Aurelia.", resolved); err != nil {
+		t.Fatalf("persistRelationships: %v", err)
+	}
+	if len(edgeWriter.edges) != 0 {
+		t.Fatalf("CreateEdge calls = %d, want 0 for an ambiguous source", len(edgeWriter.edges))
+	}
+}
+
+func TestEnrichRelationshipsFallsBackToCooccurrenceAfterModelTimeout(t *testing.T) {
+	source := models.Entity{ID: uuid.New(), Name: "Mira Voss"}
+	target := models.Entity{ID: uuid.New(), Name: "Aurelia Station"}
+	edgeWriter := &recordingRelationshipEdgeWriter{}
+	svc := &IngestionService{
+		qwenSvc:           &mockQwenForIngestion{relationshipErr: context.DeadlineExceeded},
+		relationshipEdges: edgeWriter,
+	}
+	resolved := []ResolvedEntity{{Entity: source}, {Entity: target}}
+	svc.enrichRelationships(context.Background(), uuid.New(), "Mira arrives at Aurelia.", resolved, [][]ResolvedEntity{resolved, resolved})
+
+	if len(edgeWriter.edges) != 1 || edgeWriter.edges[0].relType != "CO_OCCURS_WITH" {
+		t.Fatalf("fallback edges = %#v, want one deduplicated CO_OCCURS_WITH edge", edgeWriter.edges)
+	}
+}
+
+func TestEnrichRelationshipsSkipsFallbackWhenModelEdgePersists(t *testing.T) {
+	source := models.Entity{ID: uuid.New(), Name: "Mira Voss"}
+	target := models.Entity{ID: uuid.New(), Name: "Aurelia Station"}
+	edgeWriter := &recordingRelationshipEdgeWriter{}
+	svc := &IngestionService{
+		qwenSvc: &mockQwenForIngestion{relationships: []map[string]interface{}{
+			{"source": "Mira Voss", "target": "Aurelia Station", "type": "LOCATED_AT"},
+		}},
+		relationshipEdges: edgeWriter,
+	}
+	resolved := []ResolvedEntity{{Entity: source}, {Entity: target}}
+	svc.enrichRelationships(context.Background(), uuid.New(), "Mira arrives at Aurelia.", resolved, [][]ResolvedEntity{resolved})
+
+	if len(edgeWriter.edges) != 1 || edgeWriter.edges[0].relType != "LOCATED_AT" {
+		t.Fatalf("edges = %#v, want only persisted model relation", edgeWriter.edges)
+	}
+}
+
+func TestPersistCooccurrenceEdgesDeduplicatesAndExcludesSelfPairs(t *testing.T) {
+	a := models.Entity{ID: uuid.New(), Name: "A"}
+	b := models.Entity{ID: uuid.New(), Name: "B"}
+	c := models.Entity{ID: uuid.New(), Name: "C"}
+	edgeWriter := &recordingRelationshipEdgeWriter{}
+	svc := &IngestionService{relationshipEdges: edgeWriter}
+	_, err := svc.persistCooccurrenceEdges(context.Background(), uuid.New(), [][]ResolvedEntity{
+		{{Entity: a}, {Entity: a}, {Entity: b}},
+		{{Entity: b}, {Entity: a}},
+		{{Entity: a}, {Entity: c}},
+	})
+	if err != nil {
+		t.Fatalf("persistCooccurrenceEdges: %v", err)
+	}
+	if len(edgeWriter.edges) != 2 {
+		t.Fatalf("fallback edges = %#v, want deduplicated A-B and A-C pairs", edgeWriter.edges)
+	}
+	seen := make(map[string]bool)
+	for _, edge := range edgeWriter.edges {
+		if edge.relType != "CO_OCCURS_WITH" || edge.sourceID == edge.targetID {
+			t.Fatalf("unsafe fallback edge = %#v", edge)
+		}
+		key := edge.sourceID + ":" + edge.targetID
+		if seen[key] {
+			t.Fatalf("duplicate fallback edge = %#v", edge)
+		}
+		seen[key] = true
+	}
+}
+
+func TestPersistCooccurrenceEdgesBoundsGenerationAndWritesDeterministically(t *testing.T) {
+	makeEntity := func(id string) models.Entity {
+		return models.Entity{ID: uuid.MustParse(id), Name: id}
+	}
+	firstChunk := make([]ResolvedEntity, 0, 15)
+	for i := 1; i <= 15; i++ { // 15 choose 2 = 105 candidate pairs.
+		firstChunk = append(firstChunk, ResolvedEntity{Entity: makeEntity(fmt.Sprintf("10000000-0000-0000-0000-%012d", i))})
+	}
+	overflowSource := makeEntity("00000000-0000-0000-0000-000000000001")
+	overflowTarget := makeEntity("00000000-0000-0000-0000-000000000002")
+	chunks := [][]ResolvedEntity{
+		firstChunk,
+		{{Entity: overflowSource}, {Entity: overflowTarget}},
+	}
+
+	run := func() []recordedRelationshipEdge {
+		edgeWriter := &recordingRelationshipEdgeWriter{}
+		svc := &IngestionService{relationshipEdges: edgeWriter}
+		persisted, err := svc.persistCooccurrenceEdges(context.Background(), uuid.New(), chunks)
+		if err != nil {
+			t.Fatalf("persistCooccurrenceEdges: %v", err)
+		}
+		if persisted != ingestionFallbackEdgeLimit || len(edgeWriter.edges) != ingestionFallbackEdgeLimit {
+			t.Fatalf("persisted/writes = %d/%d, want %d", persisted, len(edgeWriter.edges), ingestionFallbackEdgeLimit)
+		}
+		return edgeWriter.edges
+	}
+
+	first := run()
+	second := run()
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("fallback order differs at %d: first=%#v second=%#v", i, first[i], second[i])
+		}
+	}
+	for _, edge := range first {
+		if edge.sourceID == overflowSource.ID.String() && edge.targetID == overflowTarget.ID.String() {
+			t.Fatalf("generated pair after cap: %#v", edge)
+		}
+	}
+}
+
+func TestIngestionServiceRelationshipAnalysisFailureIsBestEffort(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "020")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	graphRepo := repositories.NewGraphRepo(pool)
+	if err := graphRepo.CreateGraph(ctx, universe.ID.String()); err != nil {
+		t.Fatalf("create graph: %v", err)
+	}
+	// Precreate the entities and AGE nodes so ResolveOrCreate takes the exact
+	// match path. This keeps the worker entirely local: no embedding call and
+	// no Qwen HTTP client are reachable from this best-effort test.
+	graphName := "universe_" + universe.ID.String()
+	for _, entity := range []models.Entity{
+		svcCreateTestEntity(t, ctx, pool, universe.ID, "Mira", 0.8, "alive"),
+		svcCreateTestEntity(t, ctx, pool, universe.ID, "Aurelia", 0.8, "active"),
+	} {
+		if err := graphRepo.CreateNode(ctx, graphName, entity.Type, map[string]interface{}{
+			"entity_id": entity.ID.String(), "name": entity.Name, "status": entity.Status, "relevance_score": entity.RelevanceScore,
+		}); err != nil {
+			t.Fatalf("create graph node %s: %v", entity.Name, err)
+		}
+	}
+
+	qwen := &mockQwenForIngestion{
+		extractResult: &ExtractedEntities{Characters: []ExtractedEntity{
+			{Type: "character", Name: "Mira", Status: "alive"},
+			{Type: "character", Name: "Aurelia", Status: "active"},
+		}},
+		relationshipErr: errors.New("relationship model unavailable"),
+	}
+	entitySvc := NewEntityService(pool, repositories.NewEntityRepo(pool), nil, nil)
+	svc := NewIngestionService(pool, entitySvc, nil, graphRepo, qwen, nil)
+	jobID, _, err := svc.Start(ctx, universe.ID, strings.NewReader("# Arrival\n\nMira arrives at Aurelia.\n\n# Return\n\nMira returns to Aurelia."), "arrival.md")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	jobRepo := repositories.NewIngestionRepo(pool)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := jobRepo.FindByID(ctx, jobID)
+		if err != nil {
+			t.Fatalf("find ingestion job: %v", err)
+		}
+		if job != nil && job.Status != "pending" && job.Status != "running" {
+			if job.Status != "completed" {
+				t.Fatalf("job status = %q, want completed despite relationship error (%s)", job.Status, job.ErrorMessage)
+			}
+			if qwen.relationshipCalls() != 1 {
+				t.Fatalf("relationship analysis calls = %d, want one bounded manuscript pass", qwen.relationshipCalls())
+			}
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for ingestion to complete")
 }
 
 // TestIngestionServiceChunking verifies the document is split by markdown headers.

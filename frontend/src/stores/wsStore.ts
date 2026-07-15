@@ -64,9 +64,21 @@ export interface PipelineState {
   plot_hole_count?: number
 }
 
+export type SubmissionPhase = 'submitted' | 'analyzing' | 'done' | 'failed'
+
+export interface SubmissionLifecycle {
+  submissionId: string
+  paragraphRef: string
+  chapterId?: string
+  phase: SubmissionPhase
+  reason?: string
+  updatedAt: number
+}
+
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws`
 
 const MAX_RECONNECT_DELAY_MS = 30_000
+const MAX_OUTBOUND_QUEUE = 50
 
 function jitter(base: number): number {
   // ±20% jitter
@@ -86,6 +98,7 @@ interface WSState {
   ingestionProgress: Record<string, IngestionProgress>
   pipeline: PipelineState | null
   budget: BudgetReport | null
+  submissions: Record<string, SubmissionLifecycle>
   connect: (token: string) => void
   disconnect: () => void
   send: (msg: WSMessage) => void
@@ -96,6 +109,64 @@ export const useWSStore = create<WSState>((set, get) => {
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let intentionalClose = false
+  let outboundQueue: WSMessage[] = []
+
+  function submissionFromPayload(payload: Record<string, unknown>): SubmissionLifecycle | null {
+    const submissionId = typeof payload.submission_id === 'string' ? payload.submission_id : ''
+    const paragraphRef = typeof payload.paragraph_ref === 'string' ? payload.paragraph_ref : ''
+    if (!submissionId || !paragraphRef) return null
+    return {
+      submissionId,
+      paragraphRef,
+      chapterId: typeof payload.chapter_id === 'string' ? payload.chapter_id : undefined,
+      phase: 'submitted',
+      updatedAt: Date.now(),
+    }
+  }
+
+  function updateSubmission(payload: Record<string, unknown>, phase: SubmissionPhase, reason?: string) {
+    const current = submissionFromPayload(payload)
+    if (!current) return
+    const existing = get().submissions[current.submissionId]
+    set({
+      submissions: {
+        ...get().submissions,
+        [current.submissionId]: {
+          ...existing,
+          ...current,
+          phase,
+          updatedAt: Date.now(),
+          ...(reason ? { reason } : {}),
+        },
+      },
+    })
+  }
+
+  function queueOutbound(msg: WSMessage) {
+    if (outboundQueue.length >= MAX_OUTBOUND_QUEUE) {
+      const dropped = outboundQueue.shift()
+      if (dropped?.type === 'paragraph_submit') {
+        updateSubmission(dropped.payload, 'failed', 'Submission queue is full. Please try again.')
+      }
+    }
+    outboundQueue.push(msg)
+  }
+
+  function failInFlightSubmissions(reason: string) {
+    const queuedIDs = new Set(
+      outboundQueue
+        .filter((message) => message.type === 'paragraph_submit')
+        .map((message) => message.payload.submission_id)
+        .filter((value): value is string => typeof value === 'string')
+    )
+    const next = Object.fromEntries(Object.entries(get().submissions).map(([id, submission]) => {
+      if ((submission.phase === 'submitted' || submission.phase === 'analyzing') && !queuedIDs.has(id)) {
+        return [id, { ...submission, phase: 'failed' as const, reason, updatedAt: Date.now() }]
+      }
+      return [id, submission]
+    }))
+    set({ submissions: next })
+  }
 
   function clearReconnectTimer() {
     if (reconnectTimer !== null) {
@@ -115,6 +186,10 @@ export const useWSStore = create<WSState>((set, get) => {
         break
       case 'analysis_result':
         set({ analysisResults: [...get().analysisResults, payload as AnalysisResult].slice(-200) })
+        updateSubmission(payload, 'done')
+        break
+      case 'analysis_failed':
+        updateSubmission(payload, 'failed', (payload.reason as string) || 'Analysis failed')
         break
       case 'contradiction_alert':
         set({
@@ -150,6 +225,7 @@ export const useWSStore = create<WSState>((set, get) => {
           },
           ...(p.budget ? { budget: p.budget } : {}),
         })
+        updateSubmission(payload, 'analyzing')
         break
       }
       case 'ingestion_progress': {
@@ -186,8 +262,10 @@ export const useWSStore = create<WSState>((set, get) => {
     }
     ws = null
 
+    let socket: WebSocket
     try {
-      ws = new WebSocket(WS_URL)
+      socket = new WebSocket(WS_URL)
+    ws = socket
     } catch {
       set({ status: 'closed', lastError: 'WebSocket constructor failed' })
       scheduleReconnect(token, attempt)
@@ -196,13 +274,19 @@ export const useWSStore = create<WSState>((set, get) => {
 
     set({ status: 'connecting', reconnectAttempt: attempt })
 
-    ws.onopen = () => {
+    socket.onopen = () => {
+      if (ws !== socket) return
       set({ status: 'open', lastError: null })
       // Send auth_init
-      ws?.send(JSON.stringify({ type: 'auth_init', payload: { token } }))
+      socket.send(JSON.stringify({ type: 'auth_init', payload: { token } }))
+      const queued = outboundQueue
+      outboundQueue = []
+      for (const message of queued) {
+        socket.send(JSON.stringify(message))
+      }
     }
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data as string)
         dispatch(msg)
@@ -211,15 +295,17 @@ export const useWSStore = create<WSState>((set, get) => {
       }
     }
 
-    ws.onerror = () => {
+    socket.onerror = () => {
       // The close event will fire after error
     }
 
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (ws !== socket) return
       if (intentionalClose) {
         set({ status: 'closed' })
         return
       }
+      failInFlightSubmissions('Connection lost before analysis completed.')
       set({ lastError: 'Connection lost' })
       scheduleReconnect(token, attempt)
     }
@@ -237,6 +323,7 @@ export const useWSStore = create<WSState>((set, get) => {
     ingestionProgress: {},
     pipeline: null,
     budget: null,
+    submissions: {},
 
     connect: (token: string) => {
       intentionalClose = false
@@ -248,12 +335,24 @@ export const useWSStore = create<WSState>((set, get) => {
       clearReconnectTimer()
       ws?.close()
       ws = null
+      for (const message of outboundQueue) {
+        if (message.type === 'paragraph_submit') {
+          updateSubmission(message.payload, 'failed', 'Connection closed before the submission was sent.')
+        }
+      }
+      outboundQueue = []
       set({ status: 'closed' })
     },
 
     send: (msg: WSMessage) => {
+      if (msg.type === 'paragraph_submit') {
+        updateSubmission(msg.payload, 'submitted')
+      }
       const state = get()
-      if (state.status !== 'open' || !ws) return
+      if (state.status !== 'open' || !ws || ws.readyState !== WebSocket.OPEN) {
+        queueOutbound(msg)
+        return
+      }
       ws.send(JSON.stringify(msg))
     },
 
@@ -267,6 +366,7 @@ export const useWSStore = create<WSState>((set, get) => {
         ingestionProgress: {},
         pipeline: null,
         budget: null,
+        submissions: {},
       })
     },
   }

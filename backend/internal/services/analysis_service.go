@@ -19,15 +19,19 @@ import (
 
 // analysisJob represents a single paragraph to analyze.
 type analysisJob struct {
-	WorkID     uuid.UUID
-	ChapterID  uuid.UUID
-	UniverseID uuid.UUID
-	Text       string
-	UserID     uuid.UUID
+	SubmissionID string
+	ParagraphRef string
+	WorkID       uuid.UUID
+	ChapterID    uuid.UUID
+	UniverseID   uuid.UUID
+	Text         string
+	UserID       uuid.UUID
 }
 
 // AnalysisResult holds the output of a complete analysis pass.
 type AnalysisResult struct {
+	SubmissionID   string
+	ParagraphRef   string
 	WorkID         uuid.UUID
 	ChapterID      uuid.UUID
 	Entities       []models.EntityBrief
@@ -79,6 +83,10 @@ type AnalysisService struct {
 	// once per unique text.
 	seenMu sync.Mutex
 	seen   map[string]struct{}
+
+	// processJobFn keeps the worker's terminal-message contract independently
+	// testable without coupling unit tests to Qwen or PostgreSQL.
+	processJobFn func(context.Context, analysisJob) (*AnalysisResult, error)
 }
 
 // NewAnalysisService creates an analysis service. All parameters may be nil
@@ -94,7 +102,7 @@ func NewAnalysisService(
 	hub AnalysisHub,
 	memorySvc *MemoryService,
 ) *AnalysisService {
-	return &AnalysisService{
+	svc := &AnalysisService{
 		pool:        pool,
 		entitySvc:   entitySvc,
 		contraSvc:   contraSvc,
@@ -108,22 +116,26 @@ func NewAnalysisService(
 		cancels:     make(map[uuid.UUID]context.CancelFunc),
 		seen:        make(map[string]struct{}),
 	}
+	svc.processJobFn = svc.processJob
+	return svc
 }
 
 // SubmitParagraph is a convenience wrapper that satisfies the ws.ParagraphSubmitter
 // interface. It creates an analysisJob and enqueues it via Submit.
 // Starts a worker goroutine for first-time work submissions.
-func (s *AnalysisService) SubmitParagraph(ctx context.Context, workID, chapterID, universeID, userID uuid.UUID, text string) error {
+func (s *AnalysisService) SubmitParagraph(ctx context.Context, submissionID, paragraphRef string, workID, chapterID, universeID, userID uuid.UUID, text string) error {
 	s.mu.Lock()
 	_, exists := s.queues[workID]
 	s.mu.Unlock()
 
 	job := analysisJob{
-		WorkID:     workID,
-		ChapterID:  chapterID,
-		UniverseID: universeID,
-		Text:       text,
-		UserID:     userID,
+		SubmissionID: submissionID,
+		ParagraphRef: paragraphRef,
+		WorkID:       workID,
+		ChapterID:    chapterID,
+		UniverseID:   universeID,
+		Text:         text,
+		UserID:       userID,
 	}
 
 	if err := s.Submit(ctx, job); err != nil {
@@ -212,12 +224,17 @@ func (s *AnalysisService) runWorker(workID uuid.UUID) {
 			if !ok {
 				return
 			}
-			result, err := s.processJob(workerCtx, job)
+			result, err := s.processJobFn(workerCtx, job)
 			if err != nil {
 				log.Printf("[analysis] work %s job failed: %v", workID, err)
+				s.broadcastFailure(job, err)
 				continue
 			}
-			if s.hub != nil && result != nil {
+			if result == nil {
+				s.broadcastFailure(job, fmt.Errorf("analysis produced no terminal result"))
+				continue
+			}
+			if s.hub != nil {
 				s.broadcastResult(job.UserID, *result)
 			}
 		case <-workerCtx.Done():
@@ -235,8 +252,10 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	}
 
 	result := &AnalysisResult{
-		WorkID:    job.WorkID,
-		ChapterID: job.ChapterID,
+		SubmissionID: job.SubmissionID,
+		ParagraphRef: job.ParagraphRef,
+		WorkID:       job.WorkID,
+		ChapterID:    job.ChapterID,
 	}
 
 	// Skip identical re-submissions of the same paragraph text (editor
@@ -247,9 +266,9 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	if _, dup := s.seen[key]; dup {
 		s.seenMu.Unlock()
 		log.Printf("[analysis] skip duplicate paragraph chapter=%s", job.ChapterID)
-		// nil result: a skip must not broadcast an analysis_result that looks
-		// like "re-analyzed, zero findings" to the client.
-		return nil, nil
+		// A duplicate is still an accepted submission. Return an empty terminal
+		// result so the client cannot remain in the analyzing state forever.
+		return result, nil
 	}
 	// ponytail: flat 4096-entry ceiling, wholesale clear on overflow — swap
 	// for an LRU if eviction churn ever matters.
@@ -258,29 +277,45 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	}
 	s.seen[key] = struct{}{}
 	s.seenMu.Unlock()
+	// A fingerprint only suppresses a confirmed successful analysis. Release
+	// the reservation for every error path so a transient Qwen/DB failure can
+	// be retried by the editor's next debounce.
+	analysisSucceeded := false
+	defer func() {
+		if analysisSucceeded {
+			return
+		}
+		s.seenMu.Lock()
+		delete(s.seen, key)
+		s.seenMu.Unlock()
+	}()
+
+	// Emit a correlation-aware lifecycle transition before the first model
+	// call. This makes a slow or failing extraction visibly analyzing rather
+	// than leaving the client at submitted.
+	s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "analyzing", nil)
 
 	// ── Core Pass (deterministic, fast) ──
 
 	// 1. Extract entities from paragraph text
 	var resolvedEntities []ResolvedEntity
-	if s.entitySvc != nil && s.pool != nil {
+	if s.entitySvc != nil {
 		entities, err := s.extractEntities(ctx, job.UniverseID, job.Text, job.ChapterID)
 		if err != nil {
-			log.Printf("[analysis] extract entities: %v", err)
-		} else {
-			resolvedEntities = entities
-			for _, re := range resolvedEntities {
-				result.Entities = append(result.Entities, models.EntityBrief{
-					ID:   re.Entity.ID,
-					Name: re.Entity.Name,
-					Type: re.Entity.Type,
-				})
-			}
+			return nil, fmt.Errorf("extract entities: %w", err)
+		}
+		resolvedEntities = entities
+		for _, re := range resolvedEntities {
+			result.Entities = append(result.Entities, models.EntityBrief{
+				ID:   re.Entity.ID,
+				Name: re.Entity.Name,
+				Type: re.Entity.Type,
+			})
 		}
 	}
 
 	entityCount := len(result.Entities)
-	s.sendProgress(job.UserID, job.ChapterID, "entities_extracted", func(p *models.AnalysisProgressPayload) {
+	s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "entities_extracted", func(p *models.AnalysisProgressPayload) {
 		p.EntityCount = &entityCount
 	})
 
@@ -288,17 +323,16 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	if s.contraSvc != nil && len(resolvedEntities) > 0 {
 		deterministic, err := s.contraSvc.CheckDeterministic(ctx, job.UniverseID, job.ChapterID, resolvedEntities)
 		if err != nil {
-			log.Printf("[analysis] deterministic check: %v", err)
-		} else {
-			result.Contradictions = append(result.Contradictions, deterministic...)
+			return nil, fmt.Errorf("deterministic contradiction check: %w", err)
 		}
+		result.Contradictions = append(result.Contradictions, deterministic...)
 	}
 
 	// 3. Touch relevance for each mentioned entity
 	if s.relevSvc != nil {
 		for _, re := range resolvedEntities {
 			if err := s.relevSvc.Touch(ctx, re.Entity.ID, job.ChapterID); err != nil {
-				log.Printf("[analysis] touch entity %s: %v", re.Entity.ID, err)
+				return nil, fmt.Errorf("touch relevance for entity %s: %w", re.Entity.ID, err)
 			}
 		}
 	}
@@ -311,7 +345,7 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 		}
 		relationships, err := s.qwenSvc.AnalyzeRelationships(ctx, job.Text, entityNames)
 		if err != nil {
-			log.Printf("[analysis] analyze relationships: %v", err)
+			return nil, fmt.Errorf("analyze relationships: %w", err)
 		} else if s.hub != nil {
 			graphName := "universe_" + job.UniverseID.String()
 			graphRepo := repositories.NewGraphRepo(s.pool)
@@ -333,7 +367,7 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 				}
 				if sourceID != nil && targetID != nil {
 					if err := graphRepo.CreateEdge(ctx, graphName, sourceID.ID.String(), targetID.ID.String(), relType, nil); err != nil {
-						log.Printf("[analysis] create edge %s->%s: %v", source, target, err)
+						return nil, fmt.Errorf("create graph edge %s->%s: %w", source, target, err)
 					}
 				}
 			}
@@ -378,22 +412,22 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	// ── Enrichment Pass (Qwen-Max) ──
 
 	// 4. Semantic contradiction checks via Qwen-Max
-	s.sendProgress(job.UserID, job.ChapterID, "checking_contradictions", nil)
+	s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "checking_contradictions", nil)
 	if s.contraSvc != nil && len(resolvedEntities) > 0 {
 		semantic, err := s.contraSvc.CheckSemantic(ctx, job.UniverseID, job.ChapterID, job.Text, resolvedEntities, func(stage string, tc *QwenToolCall) {
 			// ponytail: forward streamed tool-call progress under the same
 			// checking_contradictions stage — no new WS stage invented for
-			// per-tool-call granularity, matching the design's 5-stage list.
-			s.sendProgress(job.UserID, job.ChapterID, "checking_contradictions", nil)
+			// per-tool-call granularity, matching the design's documented stages.
+			s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "checking_contradictions", nil)
 		})
 		if err != nil {
-			log.Printf("[analysis] semantic check: %v", err)
+			return nil, fmt.Errorf("semantic contradiction check: %w", err)
 		} else {
 			result.Contradictions = append(result.Contradictions, semantic...)
 		}
 	}
 	contradictionCount := len(result.Contradictions)
-	s.sendProgress(job.UserID, job.ChapterID, "contradictions_checked", func(p *models.AnalysisProgressPayload) {
+	s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "contradictions_checked", func(p *models.AnalysisProgressPayload) {
 		p.ContradictionCount = &contradictionCount
 	})
 
@@ -403,13 +437,12 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	if s.plotHoleSvc != nil && len(resolvedEntities) > 0 {
 		holes, err := s.plotHoleSvc.Scan(ctx, job.UniverseID, job.ChapterID)
 		if err != nil {
-			log.Printf("[analysis] plot hole scan: %v", err)
-		} else {
-			result.PlotHoles = holes
+			return nil, fmt.Errorf("plot hole scan: %w", err)
 		}
+		result.PlotHoles = holes
 	}
 	plotHoleCount := len(result.PlotHoles)
-	s.sendProgress(job.UserID, job.ChapterID, "plot_holes_scanned", func(p *models.AnalysisProgressPayload) {
+	s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "plot_holes_scanned", func(p *models.AnalysisProgressPayload) {
 		p.PlotHoleCount = &plotHoleCount
 	})
 
@@ -417,8 +450,9 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	if s.memorySvc != nil && len(resolvedEntities) > 0 {
 		items, err := s.memorySvc.Recall(ctx, job.UniverseID, nil, 5)
 		if err != nil {
-			log.Printf("[analysis] contextual recall: %v", err)
-		} else if s.hub != nil && len(items) > 0 {
+			return nil, fmt.Errorf("contextual recall: %w", err)
+		}
+		if s.hub != nil && len(items) > 0 {
 			recallPayload, _ := json.Marshal(map[string]interface{}{
 				"universe_id": job.UniverseID,
 				"items":       items,
@@ -441,23 +475,25 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 		mgr := s.qwenSvc.budgetMgr
 		alloc := mgr.ComputeBudget(0, mgr.tok.CountTokens(job.Text))
 		report := alloc.Report(mgr.maxContextTokens)
-		s.sendProgress(job.UserID, job.ChapterID, "context_budget", func(p *models.AnalysisProgressPayload) {
+		s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "context_budget", func(p *models.AnalysisProgressPayload) {
 			p.Budget = report
 		})
 	} else {
-		s.sendProgress(job.UserID, job.ChapterID, "context_budget", nil)
+		s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "context_budget", nil)
 	}
 
 	log.Printf("[analysis] work=%s chapter=%s: %d entities, %d contradictions, %d plot holes",
 		job.WorkID, job.ChapterID, len(result.Entities), len(result.Contradictions), len(result.PlotHoles))
 
+	analysisSucceeded = true
 	return result, nil
 }
 
 // extractEntities resolves or creates entities from paragraph text.
 //
-// ponytail: best-effort; if QwenService is nil or extraction fails, returns
-// empty slice rather than failing the whole job.
+// A configured extractor failure is terminal for this submission. A nil
+// optional dependency remains a no-op so isolated unit tests can exercise the
+// queue without a model or database.
 func (s *AnalysisService) extractEntities(ctx context.Context, universeID uuid.UUID, text string, chapterID uuid.UUID) ([]ResolvedEntity, error) {
 	if s.qwenSvc == nil || s.entitySvc == nil {
 		return nil, nil
@@ -489,8 +525,7 @@ func (s *AnalysisService) extractEntities(ctx context.Context, universeID uuid.U
 		}
 		entity, previousStatus, isNew, err := s.entitySvc.ResolveOrCreate(ctx, universeID, entityData)
 		if err != nil {
-			log.Printf("[analysis] resolve entity %s: %v", ee.Name, err)
-			continue
+			return nil, fmt.Errorf("resolve entity %s: %w", ee.Name, err)
 		}
 		resolved = append(resolved, ResolvedEntity{
 			Entity:         *entity,
@@ -502,7 +537,7 @@ func (s *AnalysisService) extractEntities(ctx context.Context, universeID uuid.U
 		// spec: when an archived entity is re-mentioned, reactivate it
 		if previousStatus == "archived" && s.relevSvc != nil {
 			if err := s.relevSvc.Reactivate(ctx, entity.ID); err != nil {
-				log.Printf("[analysis] reactivate entity %s: %v", entity.ID, err)
+				return nil, fmt.Errorf("reactivate entity %s: %w", entity.ID, err)
 			}
 		}
 	}
@@ -514,18 +549,18 @@ func (s *AnalysisService) extractEntities(ctx context.Context, universeID uuid.U
 // pipeline stage. mut may be nil; when provided it sets stage-specific
 // fields (counts, budget) on the payload before it's sent.
 //
-// ponytail: fires unconditionally at each of the 5 documented stages,
+// ponytail: fires an initial analyzing transition then each documented stage,
 // regardless of whether that stage's underlying step actually ran (e.g. nil
 // entitySvc) — the stage marks "pipeline reached here", counts just stay
 // zero/omitted when there's nothing to report. Matches existing
 // hub.SendToUser error handling elsewhere in processJob: log and continue,
 // never abort the pipeline.
-func (s *AnalysisService) sendProgress(userID, chapterID uuid.UUID, stage string, mut func(*models.AnalysisProgressPayload)) {
+func (s *AnalysisService) sendProgress(userID, chapterID uuid.UUID, submissionID, paragraphRef, stage string, mut func(*models.AnalysisProgressPayload)) {
 	if s.hub == nil {
 		return
 	}
 
-	payload := models.AnalysisProgressPayload{Stage: stage, ChapterID: chapterID}
+	payload := models.AnalysisProgressPayload{SubmissionID: submissionID, ParagraphRef: paragraphRef, Stage: stage, ChapterID: chapterID}
 	if mut != nil {
 		mut(&payload)
 	}
@@ -544,12 +579,14 @@ func (s *AnalysisService) sendProgress(userID, chapterID uuid.UUID, stage string
 
 // broadcastResult pushes the analysis result to the user's WebSocket connection.
 func (s *AnalysisService) broadcastResult(userID uuid.UUID, result AnalysisResult) {
-	payloadBytes, err := json.Marshal(map[string]interface{}{
-		"work_id":        result.WorkID,
-		"chapter_id":     result.ChapterID,
-		"entities":       result.Entities,
-		"contradictions": result.Contradictions,
-		"plot_holes":     result.PlotHoles,
+	payloadBytes, err := json.Marshal(models.AnalysisResultPayload{
+		SubmissionID:   result.SubmissionID,
+		ParagraphRef:   result.ParagraphRef,
+		WorkID:         result.WorkID,
+		ChapterID:      result.ChapterID,
+		Entities:       result.Entities,
+		Contradictions: result.Contradictions,
+		PlotHoles:      result.PlotHoles,
 	})
 	if err != nil {
 		log.Printf("[analysis] marshal result: %v", err)
@@ -557,11 +594,31 @@ func (s *AnalysisService) broadcastResult(userID uuid.UUID, result AnalysisResul
 	}
 
 	msg := models.WSMessage{
-		Type:    "analysis_result",
+		Type:    ws.TypeAnalysisResult,
 		Payload: payloadBytes,
 	}
 
 	if err := s.hub.SendToUser(userID, msg); err != nil {
 		log.Printf("[analysis] send result to user %s: %v", userID, err)
+	}
+}
+
+func (s *AnalysisService) broadcastFailure(job analysisJob, cause error) {
+	if s.hub == nil {
+		return
+	}
+	payload, err := json.Marshal(models.AnalysisFailedPayload{
+		SubmissionID: job.SubmissionID,
+		ParagraphRef: job.ParagraphRef,
+		WorkID:       job.WorkID,
+		ChapterID:    job.ChapterID,
+		Reason:       "analysis failed: " + cause.Error(),
+	})
+	if err != nil {
+		log.Printf("[analysis] marshal failure: %v", err)
+		return
+	}
+	if err := s.hub.SendToUser(job.UserID, models.WSMessage{Type: ws.TypeAnalysisFailed, Payload: payload}); err != nil {
+		log.Printf("[analysis] send failure to user %s: %v", job.UserID, err)
 	}
 }
