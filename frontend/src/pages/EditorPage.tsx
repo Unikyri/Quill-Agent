@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useEditorStore } from '../stores/editorStore'
 import { useWSStore } from '../stores/wsStore'
@@ -16,6 +16,33 @@ interface WorkInfo {
   id: string; title: string; universe_id: string
 }
 
+const PANEL_STORAGE_KEY = 'quill:editor-workspace-panels'
+const MIN_RAIL_WIDTH = 220
+const MIN_CONTEXT_WIDTH = 260
+const MAX_PANEL_WIDTH = 420
+
+type PanelSide = 'rail' | 'context'
+
+interface StoredPanelState {
+  railCollapsed?: boolean
+  contextCollapsed?: boolean
+  railWidth?: number
+  contextWidth?: number
+}
+
+function readPanelState(): StoredPanelState {
+  if (typeof window === 'undefined') return {}
+  try {
+    return JSON.parse(window.localStorage.getItem(PANEL_STORAGE_KEY) || '{}') as StoredPanelState
+  } catch {
+    return {}
+  }
+}
+
+function clampPanelWidth(width: number, min: number) {
+  return Math.min(Math.max(width, min), MAX_PANEL_WIDTH)
+}
+
 export default function EditorPage() {
   const { chapterId, universeId } = useParams<{ chapterId: string; universeId: string }>()
   const navigate = useNavigate()
@@ -30,8 +57,21 @@ export default function EditorPage() {
   const [creatingChapter, setCreatingChapter] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [editorReady, setEditorReady] = useState(false)
+  const [railCollapsed, setRailCollapsed] = useState(() => readPanelState().railCollapsed ?? false)
+  const [contextCollapsed, setContextCollapsed] = useState(() => readPanelState().contextCollapsed ?? false)
+  const [railWidth, setRailWidth] = useState(() => clampPanelWidth(readPanelState().railWidth ?? 240, MIN_RAIL_WIDTH))
+  const [contextWidth, setContextWidth] = useState(() => clampPanelWidth(readPanelState().contextWidth ?? 280, MIN_CONTEXT_WIDTH))
 
   useWS()
+
+  useEffect(() => {
+    window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({
+      railCollapsed,
+      contextCollapsed,
+      railWidth,
+      contextWidth,
+    }))
+  }, [railCollapsed, contextCollapsed, railWidth, contextWidth])
 
   // Load chapter data and determine workId
   useEffect(() => {
@@ -85,61 +125,114 @@ export default function EditorPage() {
     : styles.statusClosed
 
   const sorted = [...chapters].sort((a, b) => a.order_index - b.order_index)
+  const resizePanel = (side: PanelSide, clientX: number) => {
+    if (side === 'rail') {
+      setRailWidth(clampPanelWidth(clientX, MIN_RAIL_WIDTH))
+      return
+    }
+    setContextWidth(clampPanelWidth(window.innerWidth - clientX, MIN_CONTEXT_WIDTH))
+  }
+
+  const startResize = (side: PanelSide, event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const onPointerMove = (moveEvent: PointerEvent) => resizePanel(side, moveEvent.clientX)
+    const stopResize = () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', stopResize)
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', stopResize, { once: true })
+  }
+
+  const resizeWithKeyboard = (side: PanelSide, event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    const delta = event.key === 'ArrowRight' ? 16 : -16
+    if (side === 'rail') setRailWidth((width) => clampPanelWidth(width + delta, MIN_RAIL_WIDTH))
+    else setContextWidth((width) => clampPanelWidth(width - delta, MIN_CONTEXT_WIDTH))
+  }
+
+  const workspaceStyle = {
+    '--chapter-panel-width': railCollapsed ? '36px' : `${railWidth}px`,
+    '--context-panel-width': contextCollapsed ? '36px' : `${contextWidth}px`,
+  } as CSSProperties
 
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} style={workspaceStyle}>
       {/* Chapter rail */}
-      <aside className={styles.rail + ' q-scroll'}>
-        <div className={styles.railHeader}>
-          {workInfo ? (
-            <span
-              className={styles.railWorkLink}
-              role="button"
-              tabIndex={0}
-              onClick={() => navigate(`/universe/${universeId}/works`)}
-            >
-              {workInfo.title}
-            </span>
-          ) : (
-            <span className={styles.railWorkLink} style={{ color: 'var(--muted-3)', cursor: 'default' }}>
-              Works &amp; Chapters
-            </span>
-          )}
-          <button
-            className={styles.railAddBtn}
-            onClick={() => setShowNewForm((v) => !v)}
-            aria-label="New chapter"
-            title="New chapter"
-          >+</button>
-        </div>
-
-        {showNewForm && (
-          <div className={styles.railForm}>
-            <input
-              className={styles.railFormInput}
-              placeholder="Chapter title"
-              value={newChapterTitle}
-              autoFocus
-              disabled={creatingChapter}
-              onChange={(e) => setNewChapterTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
-            />
-            {submitError && <p className={styles.railFormError}>{submitError}</p>}
-          </div>
-        )}
-
-        <div className={styles.railList}>
-          {sorted.map((ch, i) => (
+      <aside id="chapter-panel" className={`${styles.rail} ${railCollapsed ? styles.panelCollapsed : ''}`} aria-label="Chapter navigation">
+        {!railCollapsed && <div className={`${styles.railContent} q-scroll`}>
+          <div className={styles.railHeader}>
+            {workInfo ? (
+              <span
+                className={styles.railWorkLink}
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/universe/${universeId}/works`)}
+              >
+                {workInfo.title}
+              </span>
+            ) : (
+              <span className={styles.railWorkLink} style={{ color: 'var(--muted-3)', cursor: 'default' }}>
+                Works &amp; Chapters
+              </span>
+            )}
             <button
-              key={ch.id}
-              className={`${styles.railItem} ${ch.id === chapterId ? styles.railItemActive : ''}`}
-              onClick={() => navigate(`/universe/${universeId}/editor/${ch.id}`)}
-            >
-              <span className={styles.railDot} data-status={ch.status} />
-              <span className={styles.railItemTitle}>{i + 1} · {ch.title}</span>
-            </button>
-          ))}
-        </div>
+              className={styles.railAddBtn}
+              onClick={() => setShowNewForm((v) => !v)}
+              aria-label="New chapter"
+              title="New chapter"
+            >+</button>
+          </div>
+
+          {showNewForm && (
+            <div className={styles.railForm}>
+              <input
+                className={styles.railFormInput}
+                placeholder="Chapter title"
+                value={newChapterTitle}
+                autoFocus
+                disabled={creatingChapter}
+                onChange={(e) => setNewChapterTitle(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
+              />
+              {submitError && <p className={styles.railFormError}>{submitError}</p>}
+            </div>
+          )}
+
+          <div className={styles.railList}>
+            {sorted.map((ch, i) => (
+              <button
+                key={ch.id}
+                className={`${styles.railItem} ${ch.id === chapterId ? styles.railItemActive : ''}`}
+                onClick={() => navigate(`/universe/${universeId}/editor/${ch.id}`)}
+              >
+                <span className={styles.railDot} data-status={ch.status} />
+                <span className={styles.railItemTitle}>{i + 1} · {ch.title}</span>
+              </button>
+            ))}
+          </div>
+        </div>}
+        <button
+          className={`${styles.panelToggle} ${styles.railToggle}`}
+          onClick={() => setRailCollapsed((collapsed) => !collapsed)}
+          aria-controls="chapter-panel"
+          aria-expanded={!railCollapsed}
+          aria-label={railCollapsed ? 'Expand chapter panel' : 'Collapse chapter panel'}
+          title={railCollapsed ? 'Expand chapter panel' : 'Collapse chapter panel'}
+        >{railCollapsed ? '›' : '‹'}</button>
+        {!railCollapsed && <div
+          className={`${styles.resizeHandle} ${styles.railResizeHandle}`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chapter panel"
+          aria-valuemin={MIN_RAIL_WIDTH}
+          aria-valuemax={MAX_PANEL_WIDTH}
+          aria-valuenow={railWidth}
+          tabIndex={0}
+          onPointerDown={(event) => startResize('rail', event)}
+          onKeyDown={(event) => resizeWithKeyboard('rail', event)}
+        />}
       </aside>
 
       {/* Editor panel */}
@@ -181,7 +274,31 @@ export default function EditorPage() {
       </div>
 
       {/* Context panel */}
-      <ContextPanel status={wsStatus} universeId={workInfo?.universe_id || universeId} />
+      <aside id="analysis-panel" className={`${styles.contextPanel} ${contextCollapsed ? styles.panelCollapsed : ''}`} aria-label="Live analysis">
+        {!contextCollapsed && <div className={styles.contextContent}>
+          <ContextPanel status={wsStatus} universeId={workInfo?.universe_id || universeId} />
+        </div>}
+        <button
+          className={`${styles.panelToggle} ${styles.contextToggle}`}
+          onClick={() => setContextCollapsed((collapsed) => !collapsed)}
+          aria-controls="analysis-panel"
+          aria-expanded={!contextCollapsed}
+          aria-label={contextCollapsed ? 'Expand live analysis panel' : 'Collapse live analysis panel'}
+          title={contextCollapsed ? 'Expand live analysis panel' : 'Collapse live analysis panel'}
+        >{contextCollapsed ? '‹' : '›'}</button>
+        {!contextCollapsed && <div
+          className={`${styles.resizeHandle} ${styles.contextResizeHandle}`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize live analysis panel"
+          aria-valuemin={MIN_CONTEXT_WIDTH}
+          aria-valuemax={MAX_PANEL_WIDTH}
+          aria-valuenow={contextWidth}
+          tabIndex={0}
+          onPointerDown={(event) => startResize('context', event)}
+          onKeyDown={(event) => resizeWithKeyboard('context', event)}
+        />}
+      </aside>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 /* ── EditorPage ─────────────────────────────────────────────────────── */
 .wrap {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--chapter-panel-width) minmax(0, 1fr) var(--context-panel-width);
   height: 100%;
   overflow: hidden;
   background: var(--bg-app);
@@ -8,10 +9,15 @@
 
 /* ── Chapter rail ──────────────────────────────────────────────────── */
 .rail {
-  width: 192px;
-  flex-shrink: 0;
   background: var(--bg-rail);
   border-right: 1px solid var(--line);
+  overflow: hidden;
+  position: relative;
+  min-width: 0;
+}
+
+.railContent {
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -151,7 +157,6 @@
 
 /* ── Editor panel ──────────────────────────────────────────────────── */
 .editorPanel {
-  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -253,4 +258,115 @@
   text-align: center;
   max-width: 260px;
   line-height: 1.5;
+}
+
+/* ── Resizable side panels ────────────────────────────────────────── */
+.contextPanel {
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-card);
+  border-left: 1px solid var(--line);
+}
+
+.contextContent {
+  height: 100%;
+  min-width: 0;
+}
+
+.contextContent > * {
+  width: 100% !important;
+  min-width: 0;
+}
+
+.panelCollapsed {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: var(--surface-sunken);
+}
+
+.panelToggle {
+  position: absolute;
+  top: 12px;
+  z-index: 2;
+  width: 22px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-card);
+  color: var(--muted-2);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.panelToggle:hover,
+.panelToggle:focus-visible {
+  color: var(--teal);
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  outline: none;
+}
+
+.railToggle { right: 7px; }
+.contextToggle { left: 7px; }
+
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizeHandle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.resizeHandle:hover::after,
+.resizeHandle:focus-visible::after {
+  background: var(--teal);
+}
+
+.resizeHandle:focus-visible { outline: none; }
+.railResizeHandle { right: -4px; }
+.railResizeHandle::after { right: 3px; }
+.contextResizeHandle { left: -4px; }
+.contextResizeHandle::after { left: 3px; }
+
+@media (max-width: 900px) {
+  .wrap {
+    grid-template-columns: 36px minmax(0, 1fr) 36px !important;
+  }
+
+  .railContent,
+  .contextContent,
+  .resizeHandle {
+    display: none;
+  }
+
+  .rail,
+  .contextPanel {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: var(--surface-sunken);
+  }
+
+  .railToggle { right: 7px; }
+  .contextToggle { left: 7px; }
+
+  .headerBar { padding-inline: 14px; }
+  .headerRight { gap: 8px; }
 }

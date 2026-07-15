@@ -72,6 +72,7 @@ function renderPage(chapterId = 'ch-1') {
 describe('EditorPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
     mockListChapters.mockResolvedValue({ chapters: [] })
     mockGetWork.mockResolvedValue({ work: { id: 'work-1', title: 'Test Work', universe_id: 'uni-1' } })
   })
@@ -93,6 +94,21 @@ describe('EditorPage', () => {
     })
     expect(screen.getByTestId('context-panel')).toHaveTextContent('open')
     expect(screen.getByText('42 words')).toBeInTheDocument()
+  })
+
+  it('collapses the chapter panel and saves the workspace preference', async () => {
+    mockGetChapter.mockResolvedValue({
+      chapter: { id: 'ch-1', content: '', raw_text: '', work_id: 'work-1', universe_id: 'uni-1' },
+    })
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('tiptap-editor')).toBeInTheDocument())
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Collapse chapter panel' }))
+
+    expect(screen.getByRole('button', { name: 'Expand chapter panel' })).toHaveAttribute('aria-expanded', 'false')
+    expect(window.localStorage.getItem('quill:editor-workspace-panels')).toContain('"railCollapsed":true')
   })
 
   it('renders sibling chapters in the rail and navigates on click', async () => {
