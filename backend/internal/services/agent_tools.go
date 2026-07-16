@@ -36,12 +36,12 @@ type entityLister interface {
 //
 // ponytail: switch dispatch — two tools, no registry overhead.
 type QuillExecutor struct {
-	VectorRepo   vectorSearcher
-	GraphRepo    graphQuerier
-	EntityRepo   entityLister
-	MemorySvc    *MemoryService
-	QwenSvc      *QwenService
-	UniverseID   uuid.UUID
+	VectorRepo vectorSearcher
+	GraphRepo  graphQuerier
+	EntityRepo entityLister
+	MemorySvc  *MemoryService
+	QwenSvc    IngestionQwen
+	UniverseID uuid.UUID
 }
 
 // ExecuteTool dispatches by tool name to the registered handler.

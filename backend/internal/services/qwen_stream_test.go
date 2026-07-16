@@ -102,6 +102,66 @@ func TestChatCompletionStream_TextOnly(t *testing.T) {
 	}
 }
 
+func TestChatCompletionStream_IgnoresSSEMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "id: response-1\nevent: result\ndata: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	stream, err := newStreamTestService(server.URL).ChatCompletionStream(context.Background(), QwenRequest{Model: "qwen-max"})
+	if err != nil {
+		t.Fatalf("ChatCompletionStream: %v", err)
+	}
+	chunks := collectStream(t, stream)
+
+	var text string
+	for _, chunk := range chunks {
+		if chunk.Type == "error" {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+		if chunk.Type == "text" {
+			text += chunk.Text
+		}
+	}
+	if text != "hello" {
+		t.Fatalf("stream text=%q, want %q", text, "hello")
+	}
+}
+
+func TestChatCompletionStream_LengthFinishIsTerminal(t *testing.T) {
+	server := newSSEServer(t, []string{
+		`{"choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}`,
+		`[DONE]`,
+	})
+	defer server.Close()
+
+	stream, err := newStreamTestService(server.URL).ChatCompletionStream(context.Background(), QwenRequest{Model: "qwen-max"})
+	if err != nil {
+		t.Fatalf("ChatCompletionStream: %v", err)
+	}
+	chunks := collectStream(t, stream)
+
+	var text string
+	var sawDone bool
+	for _, chunk := range chunks {
+		switch chunk.Type {
+		case "text":
+			text += chunk.Text
+		case "done":
+			sawDone = true
+			if chunk.Finish != "length" {
+				t.Errorf("done finish=%q, want length", chunk.Finish)
+			}
+		case "error":
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if text != "partial" || !sawDone {
+		t.Fatalf("stream text=%q done=%v, want partial/true", text, sawDone)
+	}
+}
+
 func TestChatCompletionStream_SingleToolCallFragmented(t *testing.T) {
 	// Mirrors the real DashScope shape observed in the PR3 live spike:
 	// name + id arrive once on the first fragment, arguments arrive as

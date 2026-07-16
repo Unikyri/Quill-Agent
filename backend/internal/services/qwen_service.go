@@ -142,7 +142,19 @@ type QwenRequest struct {
 // ResponseFormat requests structured JSON output from the model. DashScope
 // requires the prompt to also mention "json" somewhere when this is set.
 type ResponseFormat struct {
-	Type string `json:"type"`
+	Type       string                    `json:"type"`
+	JSONSchema *JSONSchemaResponseFormat `json:"json_schema,omitempty"`
+}
+
+// JSONSchemaResponseFormat is the provider-neutral structured-output shape.
+// The OpenAI-compatible path continues to use Type=json_object; the native
+// DashScope adapter uses Type=json_schema and serializes this descriptor under
+// response_format.json_schema.
+type JSONSchemaResponseFormat struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Schema      map[string]interface{} `json:"schema"`
+	Strict      bool                   `json:"strict,omitempty"`
 }
 
 type QwenMessage struct {
@@ -150,6 +162,10 @@ type QwenMessage struct {
 	Content    string         `json:"content,omitempty"`
 	ToolCalls  []QwenToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+	// CacheControl is metadata consumed only by the native DashScope adapter.
+	// It is excluded from the OpenAI-compatible wire format so the fallback
+	// client remains byte-for-byte compatible when LLM_PROTOCOL=openai.
+	CacheControl *CacheControl `json:"-"`
 }
 
 type QwenTool struct {

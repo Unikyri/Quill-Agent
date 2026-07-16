@@ -24,13 +24,13 @@ type Consolidator interface {
 type ConsolidationService struct {
 	consolidationRepo *repositories.ConsolidationRepo
 	entityRepo        *repositories.EntityRepo
-	qwenSvc           *QwenService
+	qwenSvc           LLMService
 }
 
 func NewConsolidationService(
 	consolidationRepo *repositories.ConsolidationRepo,
 	entityRepo *repositories.EntityRepo,
-	qwenSvc *QwenService,
+	qwenSvc LLMService,
 ) *ConsolidationService {
 	return &ConsolidationService{
 		consolidationRepo: consolidationRepo,

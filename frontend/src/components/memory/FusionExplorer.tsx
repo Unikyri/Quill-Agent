@@ -94,6 +94,11 @@ export default function FusionExplorer({ universeId, onResult }: FusionExplorerP
                     >
                       {item.fit_in_budget ? 'Fit' : 'Dropped'}
                     </span>
+                    {item.rerank_delta !== undefined && item.rerank_delta !== 0 && (
+                      <span className={styles.contribution} data-testid={`rerank-delta-${item.id}`}>
+                        {item.rerank_delta > 0 ? '↑' : '↓'}{Math.abs(item.rerank_delta)} rerank
+                      </span>
+                    )}
                   </div>
                   <div className={styles.contributions}>
                     {item.contributions.map((c) => (

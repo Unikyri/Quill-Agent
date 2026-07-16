@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -119,6 +120,7 @@ type MemoryService struct {
 	vectorRepo        *repositories.VectorRepo
 	consolidationRepo *repositories.ConsolidationRepo
 	budgetMgr         *ContextBudgetManager
+	reranker          Reranker
 
 	// historyRepo and relevanceDeltaEpsilon back MemoryStatus (see
 	// memory_status.go). Wired via SetHistoryRepo/SetRelevanceDeltaEpsilon,
@@ -148,6 +150,12 @@ func (s *MemoryService) SetBudgetMgr(b *ContextBudgetManager) {
 	s.budgetMgr = b
 }
 
+// SetReranker wires the optional post-fusion reranker. A nil reranker keeps
+// legacy RRF ordering exactly unchanged, which is the OpenAI-compatible mode.
+func (s *MemoryService) SetReranker(r Reranker) {
+	s.reranker = r
+}
+
 // Recall is the caller-compatible entrypoint kept for existing callers
 // (ws/hub.go, handlers/graph.go, analysis_service.go) that don't yet pass a
 // queryText. It delegates to RecallWithQuery with an empty queryText, which
@@ -175,9 +183,11 @@ func (s *MemoryService) RecallWithQuery(ctx context.Context, universeID uuid.UUI
 	}
 
 	fused := fuseRRF(ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated)
+	var rerankScores map[string]float64
+	fused, rerankScores = s.rerankFused(ctx, queryText, fused, k)
 
 	if s.budgetMgr != nil {
-		fused = s.fitToBudget(fused, queryText)
+		fused = s.fitToBudgetWithScores(fused, queryText, rerankScores)
 	}
 
 	if k > 0 && len(fused) > k {
@@ -226,10 +236,59 @@ func (s *MemoryService) RecallWithPipelines(ctx context.Context, universeID uuid
 	}
 
 	fused := fuseRRF(selected...)
+	fused, _ = s.rerankFused(ctx, queryText, fused, k)
 	if k > 0 && len(fused) > k {
 		fused = fused[:k]
 	}
 	return s.toRecallItems(fused), nil
+}
+
+// rerankFused applies an optional reranker to the fused top-N candidates. It
+// is deliberately best-effort: provider errors or malformed indexes log and
+// retain the exact RRF ordering so reranking cannot make recall unavailable.
+// The returned score map is keyed by item ID for RecallExplain metadata.
+func (s *MemoryService) rerankFused(ctx context.Context, query string, fused []HybridRecallItem, k int) ([]HybridRecallItem, map[string]float64) {
+	if s == nil || s.reranker == nil || query == "" || len(fused) == 0 {
+		return fused, nil
+	}
+	limit := len(fused)
+	if k > 0 && k < limit {
+		limit = k
+	}
+	documents := make([]string, limit)
+	for i := range documents {
+		documents[i] = fused[i].Fact
+	}
+	results, err := s.reranker.Rerank(ctx, query, documents, limit)
+	if err != nil {
+		log.Printf("[memory] rerank skipped: %v", err)
+		return fused, nil
+	}
+	reordered := make([]HybridRecallItem, 0, len(fused))
+	seen := make(map[string]bool, len(results))
+	scores := make(map[string]float64, len(results))
+	for _, result := range results {
+		if result.Index < 0 || result.Index >= limit {
+			log.Printf("[memory] rerank skipped invalid result index=%d limit=%d", result.Index, limit)
+			continue
+		}
+		item := fused[result.Index]
+		if seen[item.ID] {
+			continue
+		}
+		seen[item.ID] = true
+		scores[item.ID] = result.Score
+		reordered = append(reordered, item)
+	}
+	if len(reordered) == 0 {
+		return fused, nil
+	}
+	for _, item := range fused {
+		if !seen[item.ID] {
+			reordered = append(reordered, item)
+		}
+	}
+	return reordered, scores
 }
 
 // runPipelines fans out the vector, graph, recency, keyword, and
@@ -385,6 +444,33 @@ func (s *MemoryService) RecallExplain(ctx context.Context, universeID uuid.UUID,
 	}
 
 	items := fuseRRFExplain(pairs)
+	var rerankScores map[string]float64
+	if s.reranker != nil && queryText != "" && len(items) > 0 {
+		prePosition := make(map[string]int, len(items))
+		fused := make([]HybridRecallItem, len(items))
+		for i, item := range items {
+			prePosition[item.ID] = i + 1
+			fused[i] = HybridRecallItem{ID: item.ID, EntityID: item.EntityID, Fact: item.Fact, RRFScore: item.RRFScore}
+		}
+		var reordered []HybridRecallItem
+		reordered, rerankScores = s.rerankFused(ctx, queryText, fused, k)
+		if rerankScores != nil {
+			byID := make(map[string]ExplainedItem, len(items))
+			for _, item := range items {
+				byID[item.ID] = item
+			}
+			ranked := make([]ExplainedItem, 0, len(reordered))
+			for i, item := range reordered {
+				explained := byID[item.ID]
+				explained.PreRerankPosition = prePosition[item.ID]
+				explained.PostRerankPosition = i + 1
+				explained.RerankDelta = explained.PreRerankPosition - explained.PostRerankPosition
+				explained.RerankScore = rerankScores[item.ID]
+				ranked = append(ranked, explained)
+			}
+			items = ranked
+		}
+	}
 
 	pipelineSizes := make(map[string]int, len(pairs))
 	for _, p := range pairs {
@@ -395,7 +481,11 @@ func (s *MemoryService) RecallExplain(ctx context.Context, universeID uuid.UUID,
 	if s.budgetMgr != nil {
 		ranked := make([]RankedItem, len(items))
 		for i := range items {
-			ranked[i] = RankedItem{Text: items[i].Fact, Score: items[i].RRFScore}
+			score := items[i].RRFScore
+			if rerankScore, ok := rerankScores[items[i].ID]; ok {
+				score = rerankScore
+			}
+			ranked[i] = RankedItem{Text: items[i].Fact, Score: score}
 		}
 		survivors, alloc, tokensUsed := s.budgetSurvivors(ranked, s.budgetMgr.tok.CountTokens(queryText))
 		for i := range items {
@@ -557,9 +647,17 @@ func (s *MemoryService) budgetSurvivors(ranked []RankedItem, queryTokens int) (m
 // preserving the fused (RRF) order of the survivors — deterministic on score
 // ties, unlike re-emitting the internally re-sorted fitted list.
 func (s *MemoryService) fitToBudget(fused []HybridRecallItem, queryText string) []HybridRecallItem {
+	return s.fitToBudgetWithScores(fused, queryText, nil)
+}
+
+func (s *MemoryService) fitToBudgetWithScores(fused []HybridRecallItem, queryText string, rerankScores map[string]float64) []HybridRecallItem {
 	ranked := make([]RankedItem, len(fused))
 	for i := range fused {
-		ranked[i] = RankedItem{Text: fused[i].Fact, Score: fused[i].RRFScore}
+		score := fused[i].RRFScore
+		if rerankScore, ok := rerankScores[fused[i].ID]; ok {
+			score = rerankScore
+		}
+		ranked[i] = RankedItem{Text: fused[i].Fact, Score: score}
 	}
 
 	survivors, _, _ := s.budgetSurvivors(ranked, s.budgetMgr.tok.CountTokens(queryText))

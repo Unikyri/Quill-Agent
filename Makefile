@@ -13,13 +13,16 @@ else
 $(error INGESTION_PERF_PAGES must be 50, 400, or all; got "$(INGESTION_PERF_PAGES)")
 endif
 
-E2E_COMPOSE = docker compose -p quill-e2e -f docker-compose.yml -f e2e/docker-compose.e2e.yml
-PERF_COMPOSE = docker compose -p quill-perf -f docker-compose.yml -f e2e/docker-compose.e2e.yml
+REPO_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+E2E_COMPOSE = docker compose -p quill-e2e -f $(REPO_ROOT)docker-compose.yml -f $(REPO_ROOT)e2e/docker-compose.e2e.yml
+PERF_COMPOSE = docker compose -p quill-perf -f $(REPO_ROOT)docker-compose.yml -f $(REPO_ROOT)e2e/docker-compose.e2e.yml
 
 # Runs against the assembled Docker stack, not mocks. Qwen is deliberately a
 # required input: this is a local pre-merge proof, not a unit-CI target.
 e2e:
-	@set -e; set -a; if [ -f .env ]; then . ./.env; fi; set +a; \
+	@set -e; load_env() { _env_snapshot=$$(mktemp); export -p > "$$_env_snapshot"; if [ -f .env ]; then set -a; . ./.env; set +a; fi; . "$$_env_snapshot"; rm -f "$$_env_snapshot"; }; load_env; \
+		[ -z "$(LLM_PROTOCOL)" ] || export LLM_PROTOCOL="$(LLM_PROTOCOL)"; \
+		[ -z "$(QWEN_API_KEY)" ] || export QWEN_API_KEY="$(QWEN_API_KEY)"; \
 		test -n "$$QWEN_API_KEY" || (echo "QWEN_API_KEY is required for the live E2E suite"; exit 1); \
 		$(E2E_COMPOSE) down -v --remove-orphans; \
 		trap '$(E2E_COMPOSE) down -v --remove-orphans' EXIT; \
@@ -33,15 +36,17 @@ e2e:
 	cd frontend && QWEN_API_KEY="$$QWEN_API_KEY" PLAYWRIGHT_BASE_URL=http://127.0.0.1:13001 TMPDIR=/tmp npx playwright test --config=../e2e/playwright.config.ts
 
 ingestion-perf:
-	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; cd backend; go run ./cmd/ingestion-perf -pages 50 -runs 3 -fixture ../artifacts/fixtures/ingestion-50-page.md -output ../artifacts/reports/ingestion-50-page.json
-	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; cd backend; go run ./cmd/ingestion-perf -pages 400 -runs 3 -fixture ../artifacts/fixtures/ingestion-400-page.md -output ../artifacts/reports/ingestion-400-page.json
+	@set -e; load_env() { _env_snapshot=$$(mktemp); export -p > "$$_env_snapshot"; if [ -f .env ]; then set -a; . ./.env; set +a; fi; . "$$_env_snapshot"; rm -f "$$_env_snapshot"; }; load_env; [ -z "$(LLM_PROTOCOL)" ] || export LLM_PROTOCOL="$(LLM_PROTOCOL)"; [ -z "$(QWEN_API_KEY)" ] || export QWEN_API_KEY="$(QWEN_API_KEY)"; cd backend; go run ./cmd/ingestion-perf -pages 50 -runs 3 -fixture ../artifacts/fixtures/ingestion-50-page.md -output ../artifacts/reports/ingestion-50-page.json
+	@set -e; load_env() { _env_snapshot=$$(mktemp); export -p > "$$_env_snapshot"; if [ -f .env ]; then set -a; . ./.env; set +a; fi; . "$$_env_snapshot"; rm -f "$$_env_snapshot"; }; load_env; [ -z "$(LLM_PROTOCOL)" ] || export LLM_PROTOCOL="$(LLM_PROTOCOL)"; [ -z "$(QWEN_API_KEY)" ] || export QWEN_API_KEY="$(QWEN_API_KEY)"; cd backend; go run ./cmd/ingestion-perf -pages 400 -runs 3 -fixture ../artifacts/fixtures/ingestion-400-page.md -output ../artifacts/reports/ingestion-400-page.json
 
 # Live runs create an isolated PostgreSQL/Qwen benchmark stack. The runner is
 # a first-party image with no workspace mount and no .env in its build context.
 # Select exactly one fixture with INGESTION_PERF_PAGES=50 or =400. Use =all
 # only when intentionally spending quota on both isolated benchmark stacks.
 ingestion-perf-live:
-	@set -e; set -a; if [ -f .env ]; then . ./.env; fi; set +a; \
+	@set -e; load_env() { _env_snapshot=$$(mktemp); export -p > "$$_env_snapshot"; if [ -f .env ]; then set -a; . ./.env; set +a; fi; . "$$_env_snapshot"; rm -f "$$_env_snapshot"; }; load_env; \
+		[ -z "$(LLM_PROTOCOL)" ] || export LLM_PROTOCOL="$(LLM_PROTOCOL)"; \
+		[ -z "$(QWEN_API_KEY)" ] || export QWEN_API_KEY="$(QWEN_API_KEY)"; \
 		test -n "$$QWEN_API_KEY" || (echo "QWEN_API_KEY is required for live ingestion performance"; exit 1); \
 		trap '$(PERF_COMPOSE) down -v --remove-orphans' EXIT; \
 		for page in $(PERF_PAGES); do \

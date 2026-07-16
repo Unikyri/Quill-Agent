@@ -49,11 +49,14 @@ services:
     environment:
       DATABASE_URL: postgres://quill:${DB_PASSWORD:-quill_dev_password}@postgres:5432/quill?sslmode=disable
       QWEN_API_KEY: ${QWEN_API_KEY}
-      QWEN_BASE_URL: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      LLM_PROTOCOL: ${LLM_PROTOCOL:-openai}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}
+      QWEN_NATIVE_BASE_URL: ${QWEN_NATIVE_BASE_URL:-https://dashscope-intl.aliyuncs.com}
       QWEN_EXTRACTION_MODEL: ${QWEN_EXTRACTION_MODEL:-qwen-turbo}
       QWEN_REASONING_MODEL: ${QWEN_REASONING_MODEL:-qwen-max}
       QWEN_FALLBACK_MODEL: ${QWEN_FALLBACK_MODEL:-qwen-plus}
       QWEN_FALLBACK_ON_429: ${QWEN_FALLBACK_ON_429:-false}
+      QWEN_RERANK_MODEL: ${QWEN_RERANK_MODEL:-qwen3-rerank}
       QWEN_EMBEDDING_MODEL: ${QWEN_EMBEDDING_MODEL:-text-embedding-v4}
       LLM_TPM_TURBO: "${LLM_TPM_TURBO:-5000000}"
       LLM_TPM_MAX: "${LLM_TPM_MAX:-1000000}"

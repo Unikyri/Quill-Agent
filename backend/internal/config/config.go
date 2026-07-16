@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,11 +14,17 @@ type Config struct {
 	DBMaxIdleConns   int
 	QwenAPIKey       string
 	QwenBaseURL      string
+	// LLMProtocol selects the wire client at composition time. "openai" keeps
+	// the Sprint 2 compatible endpoint; "dashscope" opts into the native
+	// DashScope HTTP protocol without changing callers.
+	LLMProtocol       string
+	QwenNativeBaseURL string
 	// Role-based model configuration. These names are the supported public API.
 	QwenExtractionModel string
 	QwenReasoningModel  string
 	QwenFallbackModel   string
 	QwenFallbackOn429   bool
+	QwenRerankModel     string
 	// Deprecated compatibility aliases. Keep these until all deployments have
 	// migrated from QWEN_MAX_MODEL/QWEN_TURBO_MODEL.
 	QwenMaxModel               string
@@ -58,16 +65,33 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	protocol := strings.ToLower(strings.TrimSpace(getEnv("LLM_PROTOCOL", "openai")))
+	if protocol == "" {
+		protocol = "openai"
+	}
+	if protocol != "openai" && protocol != "dashscope" {
+		return nil, fmt.Errorf("LLM_PROTOCOL must be openai or dashscope, got %q", protocol)
+	}
+
+	baseURL := getEnv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+	nativeBaseURL := os.Getenv("QWEN_NATIVE_BASE_URL")
+	if nativeBaseURL == "" {
+		nativeBaseURL = deriveNativeBaseURL(baseURL)
+	}
+
 	cfg := &Config{
 		DatabaseURL:                getEnv("DATABASE_URL", "postgres://quill:quill_dev_password@localhost:5432/quill?sslmode=disable"),
 		DBMaxConnections:           getEnvInt("DB_MAX_CONNECTIONS", 25),
 		DBMaxIdleConns:             getEnvInt("DB_MAX_IDLE_CONNECTIONS", 5),
 		QwenAPIKey:                 os.Getenv("QWEN_API_KEY"),
-		QwenBaseURL:                getEnv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+		QwenBaseURL:                baseURL,
+		LLMProtocol:                protocol,
+		QwenNativeBaseURL:          nativeBaseURL,
 		QwenExtractionModel:        getEnvWithLegacy("QWEN_EXTRACTION_MODEL", "QWEN_TURBO_MODEL", "qwen-turbo"),
 		QwenReasoningModel:         getEnvWithLegacy("QWEN_REASONING_MODEL", "QWEN_MAX_MODEL", "qwen-max"),
 		QwenFallbackModel:          getEnv("QWEN_FALLBACK_MODEL", ""),
 		QwenFallbackOn429:          getEnvBool("QWEN_FALLBACK_ON_429", false),
+		QwenRerankModel:            getEnv("QWEN_RERANK_MODEL", "qwen3-rerank"),
 		QwenEmbeddingModel:         getEnv("QWEN_EMBEDDING_MODEL", "text-embedding-v4"),
 		QwenEmbeddingDims:          getEnvInt("QWEN_EMBEDDING_DIMENSIONS", 1024),
 		JWTSecret:                  getEnv("JWT_SECRET", "dev-secret-change-in-production"),
@@ -113,6 +137,13 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func deriveNativeBaseURL(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	base = strings.TrimSuffix(base, "/compatible-mode/v1")
+	base = strings.TrimSuffix(base, "/api/v1")
+	return base
 }
 
 func getEnvWithLegacy(key, legacyKey, fallback string) string {

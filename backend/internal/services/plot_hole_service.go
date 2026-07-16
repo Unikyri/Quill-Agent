@@ -18,12 +18,12 @@ type PlotHoleService struct {
 	plotHoleRepo *repositories.PlotHoleRepo
 	entityRepo   *repositories.EntityRepo
 	chapters     int // inactivity threshold
-	qwenSvc      *QwenService
+	qwenSvc      LLMService
 	executor     *QuillExecutor
 	agentDepth   int
 }
 
-func NewPlotHoleService(pool *pgxpool.Pool, plotHoleRepo *repositories.PlotHoleRepo, entityRepo *repositories.EntityRepo, chapters int, qwenSvc *QwenService, executor *QuillExecutor, agentDepth int) *PlotHoleService {
+func NewPlotHoleService(pool *pgxpool.Pool, plotHoleRepo *repositories.PlotHoleRepo, entityRepo *repositories.EntityRepo, chapters int, qwenSvc LLMService, executor *QuillExecutor, agentDepth int) *PlotHoleService {
 	return &PlotHoleService{
 		pool:         pool,
 		plotHoleRepo: plotHoleRepo,

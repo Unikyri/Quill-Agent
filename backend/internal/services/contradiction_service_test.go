@@ -509,6 +509,51 @@ func TestCheckSemanticEmptyContradiction(t *testing.T) {
 	}
 }
 
+// TestCheckSemanticIgnoresNonJSONFinalAnswer verifies that prose in the
+// agent's final answer degrades to an empty contradiction result instead of
+// aborting the analysis. Transport and agent-loop errors remain terminal.
+func TestCheckSemanticIgnoresNonJSONFinalAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": "Based on the evidence, no contradiction was found.",
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	qwenSvc := NewQwenService(&config.Config{
+		QwenBaseURL:          srv.URL,
+		QwenAPIKey:           "test",
+		QwenMaxConcurrency:   1,
+		QwenTurboConcurrency: 1,
+	}, nil)
+	qwenSvc.client.Timeout = 5 * time.Second
+
+	svc := NewContradictionService(nil, nil, nil, qwenSvc, &mockExecutor{}, 5, nil, 3)
+	entities := []ResolvedEntity{
+		{Entity: models.Entity{ID: uuid.New(), Type: "character", Name: "Prose Entity"}, MentionText: "mention", IsNew: false},
+	}
+
+	contradictions, err := svc.CheckSemantic(context.Background(), uuid.New(), uuid.New(), "test text", entities)
+	if err != nil {
+		t.Fatalf("CheckSemantic: %v", err)
+	}
+	if contradictions == nil {
+		t.Fatal("CheckSemantic should return an empty non-nil slice for a non-JSON final answer")
+	}
+	if len(contradictions) != 0 {
+		t.Fatalf("expected 0 contradictions, got %d", len(contradictions))
+	}
+}
+
 // TestCheckSemanticParsesFencedJSON is an approval test for CheckSemantic's
 // fence-stripping fallback: the agent's final answer sometimes arrives wrapped
 // in markdown code fences despite instructions to return raw JSON. This must

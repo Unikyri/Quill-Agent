@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -70,7 +71,7 @@ type AnalysisService struct {
 	relevSvc    Reactivatr
 	timelineSvc *TimelineService
 	plotHoleSvc *PlotHoleService
-	qwenSvc     *QwenService
+	qwenSvc     LLMService
 	hub         AnalysisHub
 	memorySvc   *MemoryService
 
@@ -98,7 +99,7 @@ func NewAnalysisService(
 	relevSvc Reactivatr,
 	timelineSvc *TimelineService,
 	plotHoleSvc *PlotHoleService,
-	qwenSvc *QwenService,
+	qwenSvc LLMService,
 	hub AnalysisHub,
 	memorySvc *MemoryService,
 ) *AnalysisService {
@@ -448,7 +449,20 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 
 	// 6. Contextual recall after analysis
 	if s.memorySvc != nil && len(resolvedEntities) > 0 {
-		items, err := s.memorySvc.Recall(ctx, job.UniverseID, nil, 5)
+		queryText := strings.TrimSpace(job.Text)
+		var queryEmbedding []float32
+		if queryText != "" && s.qwenSvc != nil {
+			var embeddingErr error
+			queryEmbedding, embeddingErr = s.qwenSvc.GenerateEmbedding(ctx, queryText)
+			if embeddingErr != nil {
+				// Recall remains useful in degraded mode (recency/graph plus
+				// keyword when queryText is available); embedding failure must
+				// not turn an otherwise successful analysis into a terminal error.
+				log.Printf("[analysis] contextual recall embedding: %v", embeddingErr)
+				queryEmbedding = nil
+			}
+		}
+		items, err := s.memorySvc.RecallWithQuery(ctx, job.UniverseID, queryEmbedding, queryText, 5)
 		if err != nil {
 			return nil, fmt.Errorf("contextual recall: %w", err)
 		}
@@ -471,8 +485,7 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 	// ponytail: input tokens coarse-estimated from job.Text alone (no access
 	// to the exact system/user prompts CheckSemantic built) — good enough for
 	// a progress indicator, apply refines if a precise figure is needed.
-	if s.qwenSvc != nil && s.qwenSvc.budgetMgr != nil {
-		mgr := s.qwenSvc.budgetMgr
+	if mgr := contextBudgetOf(s.qwenSvc); mgr != nil {
 		alloc := mgr.ComputeBudget(0, mgr.tok.CountTokens(job.Text))
 		report := alloc.Report(mgr.maxContextTokens)
 		s.sendProgress(job.UserID, job.ChapterID, job.SubmissionID, job.ParagraphRef, "context_budget", func(p *models.AnalysisProgressPayload) {

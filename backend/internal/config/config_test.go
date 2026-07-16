@@ -49,3 +49,42 @@ func TestLoadDefaultsToTextEmbeddingV4(t *testing.T) {
 		t.Fatalf("embedding model = %q, want text-embedding-v4", cfg.QwenEmbeddingModel)
 	}
 }
+
+func TestLoadDefaultsToOpenAIProtocolAndNativeDashScopeSettings(t *testing.T) {
+	t.Setenv("QWEN_API_KEY", "test-key")
+	t.Setenv("LLM_PROTOCOL", "")
+	t.Setenv("QWEN_NATIVE_BASE_URL", "")
+	t.Setenv("QWEN_RERANK_MODEL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LLMProtocol != "openai" {
+		t.Fatalf("LLMProtocol = %q, want openai", cfg.LLMProtocol)
+	}
+	if cfg.QwenNativeBaseURL != "https://dashscope-intl.aliyuncs.com" {
+		t.Fatalf("QwenNativeBaseURL = %q, want native DashScope host", cfg.QwenNativeBaseURL)
+	}
+	if cfg.QwenRerankModel != "qwen3-rerank" {
+		t.Fatalf("QwenRerankModel = %q, want qwen3-rerank", cfg.QwenRerankModel)
+	}
+}
+
+func TestLoadAcceptsDashScopeProtocolAndRejectsUnknownProtocol(t *testing.T) {
+	t.Setenv("QWEN_API_KEY", "test-key")
+	t.Setenv("LLM_PROTOCOL", "DaShScOpE")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load dashscope: %v", err)
+	}
+	if cfg.LLMProtocol != "dashscope" {
+		t.Fatalf("LLMProtocol = %q, want dashscope", cfg.LLMProtocol)
+	}
+
+	t.Setenv("LLM_PROTOCOL", "unsupported")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load unsupported protocol: expected an error")
+	}
+}

@@ -37,6 +37,10 @@ export interface ExplainedItem {
   rrf_score: number
   contributions: RRFContribution[]
   fit_in_budget: boolean
+  pre_rerank_position?: number
+  post_rerank_position?: number
+  rerank_delta?: number
+  rerank_score?: number
 }
 
 export interface RecallBudget {

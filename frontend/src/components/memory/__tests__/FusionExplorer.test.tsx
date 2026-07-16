@@ -132,6 +132,38 @@ describe('FusionExplorer', () => {
     expect(screen.queryByTestId('contribution-i3-graph')).not.toBeInTheDocument()
   })
 
+  it('shows the rerank movement chip when explain includes a positive delta', async () => {
+    recallExplain.mockResolvedValue({
+      query: 'dragon',
+      pipeline_sizes: { vector: 1, graph: 1, recency: 0, keyword: 0, consolidated: 0 },
+      items: [{
+        id: 'reranked',
+        entity_id: 'e-reranked',
+        fact: 'The dragon moved to the front',
+        rrf_score: 0.5,
+        contributions: [{ pipeline: 'vector', rank: 2, delta: 0.1 }],
+        fit_in_budget: true,
+        pre_rerank_position: 4,
+        post_rerank_position: 1,
+        rerank_delta: 3,
+        rerank_score: 0.98,
+      }],
+      budget: {
+        max_context_tokens: 1000,
+        available: 900,
+        entities_tokens: 50,
+        vector_tokens: 50,
+        tools_tokens: 0,
+        used_percent: 10,
+      },
+    })
+
+    renderAndSearch()
+
+    await waitFor(() => expect(screen.getByTestId('rerank-delta-reranked')).toBeInTheDocument())
+    expect(screen.getByTestId('rerank-delta-reranked')).toHaveTextContent('↑3 rerank')
+  })
+
   it('shows a loading state while the request is in flight and an error state on failure', async () => {
     let reject!: (err: Error) => void
     recallExplain.mockReturnValue(new Promise((_resolve, rej) => { reject = rej }))

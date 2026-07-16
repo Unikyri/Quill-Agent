@@ -27,12 +27,16 @@ type RRFContribution struct {
 // ExplainedItem is a fused, ranked recall result carrying a full per-pipeline
 // contribution ledger, for the /recall/explain endpoint.
 type ExplainedItem struct {
-	ID            string            `json:"id"`
-	EntityID      uuid.UUID         `json:"entity_id"`
-	Fact          string            `json:"fact"`
-	RRFScore      float64           `json:"rrf_score"`
-	Contributions []RRFContribution `json:"contributions"`
-	FitInBudget   bool              `json:"fit_in_budget"`
+	ID                 string            `json:"id"`
+	EntityID           uuid.UUID         `json:"entity_id"`
+	Fact               string            `json:"fact"`
+	RRFScore           float64           `json:"rrf_score"`
+	Contributions      []RRFContribution `json:"contributions"`
+	FitInBudget        bool              `json:"fit_in_budget"`
+	PreRerankPosition  int               `json:"pre_rerank_position,omitempty"`
+	PostRerankPosition int               `json:"post_rerank_position,omitempty"`
+	RerankDelta        int               `json:"rerank_delta,omitempty"`
+	RerankScore        float64           `json:"rerank_score,omitempty"`
 }
 
 // fuseRRFExplain mirrors fuseRRF's dedup/score/sort logic exactly (same
