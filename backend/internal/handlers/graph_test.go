@@ -151,6 +151,30 @@ func TestGraphHandlerRecallExplainEmbedderInvoked(t *testing.T) {
 	}
 }
 
+// TestGraphHandlerRecallEmbedsNonEmptyQuery proves /recall follows the same
+// active-provider embedding path as /recall/explain instead of silently
+// discarding req.Query and forcing degraded recall.
+func TestGraphHandlerRecallEmbedsNonEmptyQuery(t *testing.T) {
+	app := fiber.New()
+	fake := &fakeQueryEmbedder{}
+	h := NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), fake)
+	app.Post("/api/v1/universes/:id/recall", h.Recall)
+
+	body := strings.NewReader(`{"query":"who is the king","k":5}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/universes/"+uuid.New().String()+"/recall", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if !fake.called || fake.gotQuery != "who is the king" {
+		t.Fatalf("expected embedder to receive non-empty recall query, called=%v query=%q", fake.called, fake.gotQuery)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected embed failure to surface as 500, got %d", resp.StatusCode)
+	}
+}
+
 func TestGraphHandlerMemoryStatusInvalidID(t *testing.T) {
 	app := fiber.New()
 	h := NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), nil)

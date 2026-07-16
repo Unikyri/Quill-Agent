@@ -19,11 +19,11 @@ type EntityService struct {
 	pool        *pgxpool.Pool
 	entityRepo  *repositories.EntityRepo
 	vectorRepo  *repositories.VectorRepo
-	qwenSvc     *QwenService
+	qwenSvc     LLMService
 	historyRepo *repositories.EntityRelevanceHistoryRepo
 }
 
-func NewEntityService(pool *pgxpool.Pool, entityRepo *repositories.EntityRepo, vectorRepo *repositories.VectorRepo, qwenSvc *QwenService) *EntityService {
+func NewEntityService(pool *pgxpool.Pool, entityRepo *repositories.EntityRepo, vectorRepo *repositories.VectorRepo, qwenSvc LLMService) *EntityService {
 	return &EntityService{
 		pool:        pool,
 		entityRepo:  entityRepo,

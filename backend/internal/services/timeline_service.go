@@ -16,11 +16,11 @@ import (
 type TimelineService struct {
 	pool         *pgxpool.Pool
 	timelineRepo *repositories.TimelineRepo
-	qwenSvc      *QwenService
+	qwenSvc      LLMService
 	executor     ToolExecutor
 }
 
-func NewTimelineService(pool *pgxpool.Pool, timelineRepo *repositories.TimelineRepo, qwenSvc *QwenService, executor ToolExecutor) *TimelineService {
+func NewTimelineService(pool *pgxpool.Pool, timelineRepo *repositories.TimelineRepo, qwenSvc LLMService, executor ToolExecutor) *TimelineService {
 	return &TimelineService{pool: pool, timelineRepo: timelineRepo, qwenSvc: qwenSvc, executor: executor}
 }
 

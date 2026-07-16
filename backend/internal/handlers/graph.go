@@ -184,7 +184,21 @@ func (h *GraphHandler) Recall(c *fiber.Ctx) error {
 		req.K = 20
 	}
 
-	items, err := h.memorySvc.Recall(c.Context(), universeID, nil, req.K)
+	// Preserve the query through the memory pipeline. Non-empty queries use the
+	// active provider's embedding implementation so vector/keyword pipelines
+	// and the optional native reranker can participate; an empty query keeps the
+	// existing degraded-mode nil embedding behavior.
+	var embedding []float32
+	if h.embedder != nil && strings.TrimSpace(req.Query) != "" {
+		embedding, err = h.embedder.GenerateEmbedding(c.Context(), req.Query)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "failed to embed query"},
+			})
+		}
+	}
+
+	items, err := h.memorySvc.RecallWithQuery(c.Context(), universeID, embedding, req.Query, req.K)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},

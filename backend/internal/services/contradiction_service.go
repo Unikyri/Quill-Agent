@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +23,7 @@ type ContradictionService struct {
 	pool          *pgxpool.Pool
 	contraRepo    *repositories.ContradictionRepo
 	entityRepo    *repositories.EntityRepo
-	qwenSvc       *QwenService
+	qwenSvc       LLMService
 	executor      ToolExecutor
 	maxCandidates int
 	budgetMgr     *ContextBudgetManager
@@ -34,7 +35,7 @@ type ContradictionService struct {
 // executor may be nil — CheckSemantic falls back to batch mode without agent loop.
 // budgetMgr may be nil — CheckSemantic then concatenates all entities uncapped
 // (current behavior).
-func NewContradictionService(pool *pgxpool.Pool, contraRepo *repositories.ContradictionRepo, entityRepo *repositories.EntityRepo, qwenSvc *QwenService, executor ToolExecutor, maxCandidates int, budgetMgr *ContextBudgetManager, agentDepth int) *ContradictionService {
+func NewContradictionService(pool *pgxpool.Pool, contraRepo *repositories.ContradictionRepo, entityRepo *repositories.EntityRepo, qwenSvc LLMService, executor ToolExecutor, maxCandidates int, budgetMgr *ContextBudgetManager, agentDepth int) *ContradictionService {
 	return &ContradictionService{
 		pool:          pool,
 		contraRepo:    contraRepo,
@@ -234,7 +235,11 @@ IMPORTANT: Use the tools to gather context BEFORE making your decision. Only ret
 
 	var agentContras []agentContradiction
 	if err := parseJSONLoose(answer, &agentContras); err != nil {
-		return nil, fmt.Errorf("parse agent contradiction JSON: %w", err)
+		// The model's final response is untrusted presentation text. A
+		// non-JSON answer is a degraded no-contradictions result, not a failed
+		// analysis; transport and agent-loop errors are still returned above.
+		log.Printf("[contradiction] warning: agent final answer was not valid JSON; ignoring final answer")
+		agentContras = []agentContradiction{}
 	}
 
 	contradictions := make([]models.Contradiction, 0, len(agentContras))

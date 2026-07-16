@@ -12,6 +12,69 @@ import (
 	"github.com/quill/backend/internal/testutil"
 )
 
+type memoryTestReranker struct {
+	results []RerankResult
+	err     error
+	query   string
+	docs    []string
+	topN    int
+}
+
+func (r *memoryTestReranker) Rerank(_ context.Context, query string, documents []string, topN int) ([]RerankResult, error) {
+	r.query = query
+	r.docs = append([]string(nil), documents...)
+	r.topN = topN
+	return r.results, r.err
+}
+
+func TestMemoryServiceRerankFusedReordersTopNAndPreservesTail(t *testing.T) {
+	reranker := &memoryTestReranker{results: []RerankResult{{Index: 1, Score: 0.9}, {Index: 0, Score: 0.1}}}
+	svc := &MemoryService{reranker: reranker}
+	fused := []HybridRecallItem{
+		{ID: "a", Fact: "quiet lake"},
+		{ID: "b", Fact: "dragon attack"},
+		{ID: "c", Fact: "old map"},
+	}
+	reordered, scores := svc.rerankFused(context.Background(), "dragon", fused, 2)
+	if len(reordered) != 3 || reordered[0].ID != "b" || reordered[1].ID != "a" || reordered[2].ID != "c" {
+		t.Fatalf("reordered=%+v, want b,a,c", reordered)
+	}
+	if scores["b"] != 0.9 || scores["a"] != 0.1 || reranker.query != "dragon" || len(reranker.docs) != 2 || reranker.topN != 2 {
+		t.Fatalf("rerank call scores=%v query=%q docs=%v topN=%d", scores, reranker.query, reranker.docs, reranker.topN)
+	}
+}
+
+func TestMemoryServiceRerankFusedNilOrErrorIsBitIdentical(t *testing.T) {
+	fused := []HybridRecallItem{{ID: "a", Fact: "one"}, {ID: "b", Fact: "two"}}
+	for _, svc := range []*MemoryService{
+		{},
+		{reranker: &memoryTestReranker{err: fmt.Errorf("provider unavailable")}},
+	} {
+		got, scores := svc.rerankFused(context.Background(), "query", fused, 2)
+		if scores != nil || len(got) != len(fused) || got[0].ID != fused[0].ID || got[1].ID != fused[1].ID {
+			t.Fatalf("fallback got=%+v scores=%v, want original order", got, scores)
+		}
+	}
+}
+
+func TestMemoryServiceRerankFusedEmptyProviderResultDoesNotMarkRerank(t *testing.T) {
+	fused := []HybridRecallItem{{ID: "a", Fact: "one"}, {ID: "b", Fact: "two"}}
+	svc := &MemoryService{reranker: &memoryTestReranker{results: nil}}
+	got, scores := svc.rerankFused(context.Background(), "query", fused, 2)
+	if scores != nil || len(got) != len(fused) || got[0].ID != "a" || got[1].ID != "b" {
+		t.Fatalf("empty rerank result got=%+v scores=%v, want unchanged and unmarked", got, scores)
+	}
+}
+
+func TestMemoryServiceFitToBudgetUsesRerankScore(t *testing.T) {
+	svc := &MemoryService{budgetMgr: NewContextBudgetManager(NewTokenizer(), 3, 0)}
+	fused := []HybridRecallItem{{ID: "rrf-first", Fact: "a", RRFScore: 0.9}, {ID: "rerank-first", Fact: "b", RRFScore: 0.1}}
+	got := svc.fitToBudgetWithScores(fused, "", map[string]float64{"rrf-first": 0.1, "rerank-first": 0.9})
+	if len(got) != 1 || got[0].ID != "rerank-first" {
+		t.Fatalf("budget survivors=%+v, want rerank score to select rerank-first", got)
+	}
+}
+
 // TestMemoryServiceRecallNormalModeVectorSeedsGraph verifies that, given a
 // non-empty embedding, the graph pipeline seeds from the entities mentioned
 // in the top vector-ranked paragraphs (not from global recency) — an entity

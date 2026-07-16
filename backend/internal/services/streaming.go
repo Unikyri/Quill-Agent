@@ -34,20 +34,46 @@ type accToolCall struct {
 // streamResponseFrame mirrors one SSE "data:" frame of a Qwen streaming chat
 // completion response.
 type streamResponseFrame struct {
-	Choices []struct {
-		Delta struct {
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				Index    int    `json:"index"`
-				ID       string `json:"id"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
+	Choices []streamChoice `json:"choices"`
+	Output  struct {
+		Text         string         `json:"text"`
+		Choices      []streamChoice `json:"choices"`
+		FinishReason string         `json:"finish_reason"`
+	} `json:"output"`
+	Usage streamUsage `json:"usage"`
+}
+
+type streamChoice struct {
+	Delta struct {
+		Content   string           `json:"content"`
+		ToolCalls []streamToolCall `json:"tool_calls"`
+	} `json:"delta"`
+	Message struct {
+		Content   string           `json:"content"`
+		ToolCalls []streamToolCall `json:"tool_calls"`
+	} `json:"message"`
+	FinishReason string `json:"finish_reason"`
+}
+
+type streamToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// streamUsage is provider-neutral enough for both the compatible and native
+// DashScope SSE envelopes. DashScope includes cache counts in the final frame.
+type streamUsage struct {
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens             int `json:"cached_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	} `json:"prompt_tokens_details"`
 }
 
 // ChatCompletionStream sends payload with stream:true and returns a channel
@@ -74,11 +100,20 @@ func (s *QwenService) ChatCompletionStream(ctx context.Context, payload QwenRequ
 // readStream parses SSE frames off body, accumulates tool-call deltas by
 // index, and emits StreamChunk values on ch. It closes ch and body when done.
 func readStream(body io.ReadCloser, ch chan<- StreamChunk) (success bool) {
+	return readStreamWithUsage(body, ch, nil)
+}
+
+// readStreamWithUsage is the shared SSE parser. The optional callback receives
+// the last provider-reported usage frame after a successful stream, avoiding
+// double-counting when a provider repeats cumulative usage on every frame.
+func readStreamWithUsage(body io.ReadCloser, ch chan<- StreamChunk, onUsage func(streamUsage)) (success bool) {
 	defer close(ch)
 	defer body.Close()
 
 	acc := map[int]*accToolCall{}
 	finished := false
+	var lastUsage streamUsage
+	hasUsage := false
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -88,7 +123,17 @@ func readStream(body io.ReadCloser, ch chan<- StreamChunk) (success bool) {
 		if line == "" {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
+		// SSE streams may include event/id/retry fields and comments between
+		// data frames. They are transport metadata, not JSON payloads. Native
+		// DashScope responses emit these fields while the compatible endpoint
+		// commonly omits them, so ignore them consistently for both transports.
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
 		if data == "[DONE]" {
 			break
 		}
@@ -98,10 +143,33 @@ func readStream(body io.ReadCloser, ch chan<- StreamChunk) (success bool) {
 			ch <- StreamChunk{Type: "error", Err: fmt.Errorf("unmarshal stream chunk: %w", err)}
 			return false
 		}
-		if len(frame.Choices) == 0 {
+		if frame.Usage.InputTokens != 0 || frame.Usage.OutputTokens != 0 || frame.Usage.TotalTokens != 0 || frame.Usage.PromptTokensDetails.CachedTokens != 0 || frame.Usage.PromptTokensDetails.CacheCreationInputTokens != 0 {
+			lastUsage = frame.Usage
+			hasUsage = true
+		}
+		choices := frame.Choices
+		if len(choices) == 0 {
+			choices = frame.Output.Choices
+		}
+		if len(choices) == 0 && frame.Output.Text != "" {
+			var choice streamChoice
+			choice.Delta.Content = frame.Output.Text
+			choice.FinishReason = frame.Output.FinishReason
+			choices = []streamChoice{choice}
+		}
+		if len(choices) == 0 {
 			continue
 		}
-		choice := frame.Choices[0]
+		choice := choices[0]
+		if choice.Delta.Content == "" {
+			choice.Delta.Content = choice.Message.Content
+		}
+		if len(choice.Delta.ToolCalls) == 0 {
+			choice.Delta.ToolCalls = choice.Message.ToolCalls
+		}
+		if choice.FinishReason == "" {
+			choice.FinishReason = frame.Output.FinishReason
+		}
 
 		if choice.Delta.Content != "" {
 			ch <- StreamChunk{Type: "text", Text: choice.Delta.Content}
@@ -126,9 +194,9 @@ func readStream(body io.ReadCloser, ch chan<- StreamChunk) (success bool) {
 		case "tool_calls":
 			finished = true
 			flushToolCalls(acc, ch)
-		case "stop":
+		case "stop", "length", "content_filter":
 			finished = true
-			ch <- StreamChunk{Type: "done", Finish: "stop"}
+			ch <- StreamChunk{Type: "done", Finish: choice.FinishReason}
 		}
 	}
 
@@ -140,6 +208,9 @@ func readStream(body io.ReadCloser, ch chan<- StreamChunk) (success bool) {
 	if !finished {
 		ch <- StreamChunk{Type: "error", Err: fmt.Errorf("stream ended without a finish_reason completion signal")}
 		return false
+	}
+	if hasUsage && onUsage != nil {
+		onUsage(lastUsage)
 	}
 	return true
 }

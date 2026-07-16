@@ -15,12 +15,12 @@ import (
 
 type HealthHandler struct {
 	pool        *pgxpool.Pool
-	qwenSvc     *services.QwenService
+	qwenSvc     services.LLMHealthChecker
 	qwenTimeout time.Duration
 	start       time.Time
 }
 
-func NewHealthHandler(pool *pgxpool.Pool, qwenSvc *services.QwenService, cfg *config.Config) *HealthHandler {
+func NewHealthHandler(pool *pgxpool.Pool, qwenSvc services.LLMHealthChecker, cfg *config.Config) *HealthHandler {
 	return &HealthHandler{
 		pool:        pool,
 		qwenSvc:     qwenSvc,
@@ -84,7 +84,7 @@ func probeExtension(ctx context.Context, pool *pgxpool.Pool, extname string) str
 	return "available"
 }
 
-func probeQwen(ctx context.Context, svc *services.QwenService, timeout time.Duration) string {
+func probeQwen(ctx context.Context, svc services.LLMHealthChecker, timeout time.Duration) string {
 	if svc == nil {
 		return "not_configured"
 	}

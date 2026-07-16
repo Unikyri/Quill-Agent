@@ -87,20 +87,31 @@ func main() {
 
 	tok := services.NewTokenizer()
 	budgetMgr := services.NewContextBudgetManager(tok, cfg.MaxContextTokens, cfg.ResponseReserve)
-	qwenSvc := services.NewQwenService(cfg, budgetMgr)
+	var llmSvc services.LLMService
+	switch cfg.LLMProtocol {
+	case "dashscope":
+		llmSvc = services.NewDashScopeService(cfg, budgetMgr)
+	default:
+		// Keep OpenAI-compatible Qwen as the reversible fallback. An invalid
+		// protocol is rejected by config.Load before the composition root.
+		llmSvc = services.NewQwenService(cfg, budgetMgr)
+	}
 	authSvc := services.NewAuthService(userRepo, cfg)
 	universeSvc := services.NewUniverseService(pool, universeRepo, graphRepo)
 	workSvc := services.NewWorkService(pool, workRepo)
-	entitySvc := services.NewEntityService(pool, entityRepo, vectorRepo, qwenSvc)
+	entitySvc := services.NewEntityService(pool, entityRepo, vectorRepo, llmSvc)
 	demoSvc := services.NewDemoService(pool, universeRepo, graphRepo)
 
 	// Phase 2a services
-	consolidationSvc := services.NewConsolidationService(consolidationRepo, entityRepo, qwenSvc)
+	consolidationSvc := services.NewConsolidationService(consolidationRepo, entityRepo, llmSvc)
 	relevSvc := services.NewRelevanceService(pool, entityRepo, cfg.DecayLambda, cfg.ArchiveThreshold, consolidationSvc)
 	chapterSvc := services.NewChapterService(pool, chapterRepo, workRepo, relevSvc)
 	memorySvc := services.NewMemoryService(graphRepo, entityRepo, vectorRepo)
 	memorySvc.SetConsolidationRepo(consolidationRepo)
 	memorySvc.SetBudgetMgr(budgetMgr)
+	if reranker, ok := llmSvc.(services.Reranker); ok {
+		memorySvc.SetReranker(reranker)
+	}
 	memorySvc.SetHistoryRepo(repositories.NewEntityRelevanceHistoryRepo(pool))
 	memorySvc.SetRelevanceDeltaEpsilon(cfg.RelevanceDeltaEpsilon)
 
@@ -111,25 +122,25 @@ func main() {
 		GraphRepo:  graphRepo,
 		EntityRepo: entityRepo,
 		MemorySvc:  memorySvc,
-		QwenSvc:    qwenSvc,
+		QwenSvc:    llmSvc,
 	}
 
-	timelineSvc := services.NewTimelineService(pool, timelineRepo, qwenSvc, executor)
-	plotHoleSvc := services.NewPlotHoleService(pool, plotHoleRepo, entityRepo, cfg.PlotHoleChapters, qwenSvc, executor, cfg.PlotHoleAgentDepth)
+	timelineSvc := services.NewTimelineService(pool, timelineRepo, llmSvc, executor)
+	plotHoleSvc := services.NewPlotHoleService(pool, plotHoleRepo, entityRepo, cfg.PlotHoleChapters, llmSvc, executor, cfg.PlotHoleAgentDepth)
 
-	contraSvc := services.NewContradictionService(pool, contradictionRepo, entityRepo, qwenSvc, executor, cfg.MaxContradictionCandidates, budgetMgr, cfg.ContradictionAgentDepth)
+	contraSvc := services.NewContradictionService(pool, contradictionRepo, entityRepo, llmSvc, executor, cfg.MaxContradictionCandidates, budgetMgr, cfg.ContradictionAgentDepth)
 
 	// WebSocket Hub (created first with nil submitter/recaller — set later to avoid circular init)
-	hub := ws.NewHub(authSvc, nil, memorySvc, qwenSvc)
+	hub := ws.NewHub(authSvc, nil, memorySvc, llmSvc)
 
 	// AnalysisService (depends on all other services and the hub)
-	analysisSvc := services.NewAnalysisService(pool, entitySvc, contraSvc, relevSvc, timelineSvc, plotHoleSvc, qwenSvc, hub, memorySvc)
+	analysisSvc := services.NewAnalysisService(pool, entitySvc, contraSvc, relevSvc, timelineSvc, plotHoleSvc, llmSvc, hub, memorySvc)
 
 	// Wire the analysis service into the hub (now both exist)
 	hub.SetSubmitter(analysisSvc)
 
 	// Ingestion service (async document upload pipeline)
-	ingestionSvc := services.NewIngestionService(pool, entitySvc, vectorRepo, graphRepo, qwenSvc, hub)
+	ingestionSvc := services.NewIngestionService(pool, entitySvc, vectorRepo, graphRepo, llmSvc, hub)
 	ingestionSvc.SetPostIngestAnalysis(contraSvc, plotHoleSvc, budgetMgr, cfg.IngestAnalysisMaxChapters)
 
 	// ── Handlers ──
@@ -139,14 +150,14 @@ func main() {
 	workH := handlers.NewWorkHandler(workSvc)
 	chapterH := handlers.NewChapterHandler(chapterSvc)
 	entityH := handlers.NewEntityHandler(entitySvc)
-	healthH := handlers.NewHealthHandler(pool, qwenSvc, cfg)
+	healthH := handlers.NewHealthHandler(pool, llmSvc, cfg)
 	demoH := handlers.NewDemoHandler(demoSvc)
 
 	// Phase 2a handlers
 	contradictionH := handlers.NewContradictionHandler(contraSvc, contradictionRepo)
 	timelineH := handlers.NewTimelineHandler(timelineSvc, timelineRepo)
 	plotHoleH := handlers.NewPlotHoleHandler(plotHoleSvc).WithRepo(plotHoleRepo)
-	graphH := handlers.NewGraphHandler(graphRepo, memorySvc, entityRepo, qwenSvc)
+	graphH := handlers.NewGraphHandler(graphRepo, memorySvc, entityRepo, llmSvc)
 	graphH.SetDecayer(relevSvc)
 	ingestionH := handlers.NewIngestionHandler(ingestionSvc)
 
