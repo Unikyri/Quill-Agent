@@ -13,13 +13,23 @@ import (
 	"github.com/quill/backend/internal/ws"
 )
 
+// These narrow interfaces make the post-ingest contract observable without a
+// live Qwen request while the production services continue to satisfy them.
+type postIngestContradictionAnalyzer interface {
+	CheckSemantic(context.Context, uuid.UUID, uuid.UUID, string, []ResolvedEntity, ...func(string, *QwenToolCall)) ([]models.Contradiction, error)
+}
+
+type postIngestPlotHoleAnalyzer interface {
+	Scan(context.Context, uuid.UUID, uuid.UUID) ([]models.PlotHole, error)
+}
+
 // SetPostIngestAnalysis wires optional bounded contradiction/plot-hole
 // analysis to run after a document finishes ingesting. Same nil-safe setter
 // pattern as MemoryService.SetConsolidationRepo — the constructor signature
 // and all existing NewIngestionService call sites are unaffected. Any nil
 // dependency (or never calling this setter) means runPostIngestAnalysis is a
 // no-op: analysis is silently skipped, same as pre-change behavior.
-func (s *IngestionService) SetPostIngestAnalysis(contraSvc *ContradictionService, plotHoleSvc *PlotHoleService, budgetMgr *ContextBudgetManager, maxChapters int) {
+func (s *IngestionService) SetPostIngestAnalysis(contraSvc postIngestContradictionAnalyzer, plotHoleSvc postIngestPlotHoleAnalyzer, budgetMgr *ContextBudgetManager, maxChapters int) {
 	s.contraSvc = contraSvc
 	s.plotHoleSvc = plotHoleSvc
 	s.analysisBudgetMgr = budgetMgr

@@ -19,6 +19,13 @@ type IngestionStarter interface {
 	ListJobs(ctx context.Context, universeID uuid.UUID) ([]models.IngestionJob, error)
 }
 
+// IngestionWorkStarter is implemented by the production service. Keeping it
+// separate preserves existing starter seams while allowing clients to opt in
+// to appending an import to a known Work.
+type IngestionWorkStarter interface {
+	StartForWork(ctx context.Context, universeID, workID uuid.UUID, reader io.Reader, filename string) (jobID uuid.UUID, duplicate bool, err error)
+}
+
 // IngestionHandler handles document upload for async ingestion.
 type IngestionHandler struct {
 	ingestionSvc IngestionStarter
@@ -101,7 +108,29 @@ func (h *IngestionHandler) Ingest(c *fiber.Ctx) error {
 	}
 	defer f.Close()
 
-	jobID, duplicate, err := h.ingestionSvc.Start(c.Context(), universeID, f, file.Filename)
+	var targetWorkID uuid.UUID
+	if rawWorkID := c.FormValue("work_id"); rawWorkID != "" {
+		targetWorkID, err = uuid.Parse(rawWorkID)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid work_id"},
+			})
+		}
+	}
+
+	var jobID uuid.UUID
+	var duplicate bool
+	if targetWorkID != uuid.Nil {
+		starter, ok := h.ingestionSvc.(IngestionWorkStarter)
+		if !ok {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fiber.Map{"code": "INTERNAL_ERROR", "message": "Targeted imports are unavailable"},
+			})
+		}
+		jobID, duplicate, err = starter.StartForWork(c.Context(), universeID, targetWorkID, f, file.Filename)
+	} else {
+		jobID, duplicate, err = h.ingestionSvc.Start(c.Context(), universeID, f, file.Filename)
+	}
 	if err != nil {
 		if errors.Is(err, services.ErrUnsupportedFileType) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{

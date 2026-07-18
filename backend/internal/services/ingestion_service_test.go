@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -61,6 +62,29 @@ type mockQwenForIngestion struct {
 	relationshipMu        sync.Mutex
 	relationshipCallCount int
 	embeddingBatchSizes   []int
+}
+
+type recordingIngestionRelevance struct {
+	decayCalls int
+	mentioned  []uuid.UUID
+	deadline   time.Time
+	ctxErr     error
+	err        error
+}
+
+func (m *recordingIngestionRelevance) Touch(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
+func (m *recordingIngestionRelevance) DecayExcept(ctx context.Context, _ uuid.UUID, mentioned []uuid.UUID) error {
+	m.decayCalls++
+	m.mentioned = append([]uuid.UUID(nil), mentioned...)
+	m.deadline, _ = ctx.Deadline()
+	m.ctxErr = ctx.Err()
+	if m.err != nil {
+		return m.err
+	}
+	return ctx.Err()
 }
 
 // boundedMapQwen blocks each provider task until the test releases it. This
@@ -374,6 +398,86 @@ func TestReduceMentionsSeriallyResolvesDuplicatesAndPersistsMentions(t *testing.
 	}
 	if offset != 3 {
 		t.Fatalf("persisted offset = %d, want 3", offset)
+	}
+}
+
+// TestReduceMentionsReinforcesImportedEntities proves imported entities get
+// relevance from their actual mention frequency instead of every extracted
+// entity remaining at the same creation default.
+func TestReduceMentionsReinforcesImportedEntities(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "023")
+	ctx := context.Background()
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	work := svcCreateTestWork(t, ctx, pool, universe.ID)
+	chapter := svcCreateTestChapter(t, ctx, pool, work.ID, "Arrival", 1)
+	entityRepo := repositories.NewEntityRepo(pool)
+
+	svc := &IngestionService{pool: pool, entitySvc: NewEntityService(pool, entityRepo, nil, newErrorQwenService(t))}
+	svc.SetRelevance(NewRelevanceService(pool, entityRepo, 0.1, 0.15, nil))
+	mentions := []extractedMention{
+		{Entity: repositories.ExtractedEntity{Type: "character", Name: "James Holden"}, ParagraphIndex: 0, Offset: 0, Snippet: "Holden arrives."},
+		{Entity: repositories.ExtractedEntity{Type: "character", Name: "James Holden"}, ParagraphIndex: 1, Offset: 0, Snippet: "Holden speaks."},
+		{Entity: repositories.ExtractedEntity{Type: "character", Name: "James Holden"}, ParagraphIndex: 2, Offset: 0, Snippet: "Holden leaves."},
+		{Entity: repositories.ExtractedEntity{Type: "character", Name: "Naomi Nagata"}, ParagraphIndex: 3, Offset: 0, Snippet: "Naomi watches."},
+	}
+	svc.reduceMentions(ctx, universe.ID, chapter.ID, mentions)
+
+	holden, err := entityRepo.FindByNaturalKey(ctx, universe.ID, "James Holden", "character")
+	if err != nil {
+		t.Fatalf("find Holden: %v", err)
+	}
+	naomi, err := entityRepo.FindByNaturalKey(ctx, universe.ID, "Naomi Nagata", "character")
+	if err != nil {
+		t.Fatalf("find Naomi: %v", err)
+	}
+	if math.Abs(holden.RelevanceScore-0.95) > 0.0001 || math.Abs(naomi.RelevanceScore-0.65) > 0.0001 {
+		t.Fatalf("imported relevance Holden=%f Naomi=%f, want 0.95/0.65", holden.RelevanceScore, naomi.RelevanceScore)
+	}
+}
+
+func TestDecayCompletedIngestionRunsOnceAndExcludesFinalChapterEntities(t *testing.T) {
+	firstID := uuid.New()
+	finalID := uuid.New()
+	relevance := &recordingIngestionRelevance{}
+	svc := &IngestionService{relevance: relevance}
+
+	svc.decayCompletedIngestion(context.Background(), uuid.New(), []ingestedChapter{
+		{ID: uuid.New(), Entities: []ResolvedEntity{{Entity: models.Entity{ID: firstID}}}},
+		{ID: uuid.New(), Entities: []ResolvedEntity{
+			{Entity: models.Entity{ID: finalID}},
+			{Entity: models.Entity{ID: finalID}},
+		}},
+	})
+
+	if relevance.decayCalls != 1 {
+		t.Fatalf("decay calls = %d, want one per completed import", relevance.decayCalls)
+	}
+	if !reflect.DeepEqual(relevance.mentioned, []uuid.UUID{finalID}) {
+		t.Fatalf("excluded entities = %v, want final chapter entity %v", relevance.mentioned, finalID)
+	}
+}
+
+func TestDecayCompletedIngestionUsesBoundedCancelableContextAndIsBestEffort(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	relevance := &recordingIngestionRelevance{err: context.Canceled}
+	svc := &IngestionService{relevance: relevance}
+
+	svc.decayCompletedIngestion(parent, uuid.New(), []ingestedChapter{{ID: uuid.New()}})
+
+	if relevance.decayCalls != 1 {
+		t.Fatalf("decay calls = %d, want one", relevance.decayCalls)
+	}
+	if relevance.deadline.IsZero() {
+		t.Fatal("decay context has no deadline")
+	}
+	if !errors.Is(relevance.ctxErr, context.Canceled) {
+		t.Fatalf("decay context error = %v, want context canceled", relevance.ctxErr)
+	}
+	if remaining := time.Until(relevance.deadline); remaining <= 0 || remaining > ingestionDecayTimeout {
+		t.Fatalf("decay deadline remaining = %s, want within %s", remaining, ingestionDecayTimeout)
 	}
 }
 
@@ -998,6 +1102,206 @@ func TestStartWorkTitleFromFilenameStem(t *testing.T) {
 	}
 }
 
+// TestIngestionServicePersistsParsedDocumentTitle verifies a newly-created
+// Work is renamed from its provisional filename stem to the document title
+// after the asynchronous import parses valid title metadata.
+func TestIngestionServicePersistsParsedDocumentTitle(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "021")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Parsed Title Universe", GenreTags: []string{"fantasy"}}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO universes (id, user_id, name, description, genre_tags)
+		VALUES ($1, $2, $3, $4, $5)
+	`, universe.ID, universe.UserID, universe.Name, "", universe.GenreTags); err != nil {
+		t.Fatalf("create current-schema universe: %v", err)
+	}
+
+	svc := &IngestionService{pool: pool}
+	jobID, duplicate, err := svc.Start(ctx, universe.ID, strings.NewReader("---\ntitle: The Glass Atlas\n---\n\n# Chapter One\n\nThe journey begins."), "draft-v7.md")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if duplicate {
+		t.Fatal("Start unexpectedly reported a duplicate import")
+	}
+
+	jobRepo := repositories.NewIngestionRepo(pool)
+	deadline := time.Now().Add(5 * time.Second)
+	var job *models.IngestionJob
+	for time.Now().Before(deadline) {
+		job, err = jobRepo.FindByID(ctx, jobID)
+		if err != nil {
+			t.Fatalf("FindByID: %v", err)
+		}
+		if job.Status != "pending" && job.Status != "running" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if job == nil || job.Status != "completed" {
+		if job == nil {
+			t.Fatal("timed out waiting for ingestion job to be created")
+		}
+		t.Fatalf("job status = %q, want completed (%s)", job.Status, job.ErrorMessage)
+	}
+
+	work, err := repositories.NewWorkRepo(pool).FindByID(ctx, job.WorkID)
+	if err != nil {
+		t.Fatalf("FindByID work: %v", err)
+	}
+	if work.Title != "The Glass Atlas" {
+		t.Errorf("work title = %q, want parsed document title %q", work.Title, "The Glass Atlas")
+	}
+}
+
+// TestIngestionServicePersistsPDFTitleAndCharacterChapters exercises the
+// complete PDF path: Info metadata names the Work, while short ALL-CAPS
+// character names become separate durable chapters.
+func TestIngestionServicePersistsPDFTitleAndCharacterChapters(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "021")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	// Migration 021 replaces universes.genre with genre_tags, so this test
+	// must use the current fixture shape instead of the legacy shared helper.
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "PDF Title Universe", GenreTags: []string{"fantasy"}}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO universes (id, user_id, name, description, genre_tags)
+		VALUES ($1, $2, $3, $4, $5)
+	`, universe.ID, universe.UserID, universe.Name, "", universe.GenreTags); err != nil {
+		t.Fatalf("create current-schema universe: %v", err)
+	}
+	svc := &IngestionService{pool: pool}
+	pdf := buildTestPDFWithTitle("AMOS\n\nHe met Amos at dusk.\n\nBOB\n\nShe met Bob at dawn.", "The Glass City")
+	jobID, duplicate, err := svc.Start(ctx, universe.ID, strings.NewReader(string(pdf)), "draft.pdf")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if duplicate {
+		t.Fatal("Start unexpectedly reported a duplicate import")
+	}
+
+	jobRepo := repositories.NewIngestionRepo(pool)
+	deadline := time.Now().Add(5 * time.Second)
+	var job *models.IngestionJob
+	for time.Now().Before(deadline) {
+		job, err = jobRepo.FindByID(ctx, jobID)
+		if err != nil {
+			t.Fatalf("FindByID: %v", err)
+		}
+		if job.Status != "pending" && job.Status != "running" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if job == nil || job.Status != "completed" {
+		if job == nil {
+			t.Fatal("timed out waiting for ingestion job")
+		}
+		t.Fatalf("job status = %q, want completed (%s)", job.Status, job.ErrorMessage)
+	}
+
+	work, err := repositories.NewWorkRepo(pool).FindByID(ctx, job.WorkID)
+	if err != nil {
+		t.Fatalf("FindByID work: %v", err)
+	}
+	if work.Title != "The Glass City" {
+		t.Fatalf("work title = %q, want %q", work.Title, "The Glass City")
+	}
+	chapters, err := repositories.NewChapterRepo(pool).ListByWork(ctx, work.ID)
+	if err != nil {
+		t.Fatalf("ListByWork: %v", err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("chapter count = %d, want 2", len(chapters))
+	}
+	if chapters[0].Title != "AMOS" || !strings.Contains(chapters[0].Content, "met Amos at dusk") {
+		t.Errorf("first chapter = %#v, want AMOS with its body", chapters[0])
+	}
+	if chapters[1].Title != "BOB" || !strings.Contains(chapters[1].Content, "met Bob at dawn") {
+		t.Errorf("second chapter = %#v, want BOB with its body", chapters[1])
+	}
+}
+
+// TestRunWorkerPreservesManualRenameDuringAsynchronousImport verifies the
+// conditional title update cannot overwrite a title the writer saved while a
+// newly-created import was pending parsing.
+func TestRunWorkerPreservesManualRenameDuringAsynchronousImport(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "021")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Manual Rename Universe", GenreTags: []string{"fantasy"}}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO universes (id, user_id, name, description, genre_tags)
+		VALUES ($1, $2, $3, $4, $5)
+	`, universe.ID, universe.UserID, universe.Name, "", universe.GenreTags); err != nil {
+		t.Fatalf("create current-schema universe: %v", err)
+	}
+	workRepo := repositories.NewWorkRepo(pool)
+	work := models.Work{
+		ID:         uuid.New(),
+		UniverseID: universe.ID,
+		Title:      provisionalWorkTitle("draft-v7.md"),
+		Type:       "novel",
+		Status:     "in_progress",
+		OrderIndex: 1,
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin create work: %v", err)
+	}
+	if err := workRepo.Create(ctx, tx, &work); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("create work: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit create work: %v", err)
+	}
+
+	jobID := uuid.New()
+	if err := repositories.NewIngestionRepo(pool).Create(ctx, jobID, universe.ID, work.ID, "pending", "draft-v7.md", "md", uuid.NewString()); err != nil {
+		t.Fatalf("create ingestion job: %v", err)
+	}
+
+	// Model the writer's normal update while the queued worker has not yet
+	// parsed metadata. The worker must preserve this newer explicit choice.
+	work.Title = "Writer's chosen title"
+	tx, err = pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin manual rename: %v", err)
+	}
+	if err := workRepo.Update(ctx, tx, universe.ID, &work); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("manual rename: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit manual rename: %v", err)
+	}
+
+	(&IngestionService{pool: pool}).runWorker(
+		jobID,
+		universe.ID,
+		work.ID,
+		true,
+		[]byte("---\ntitle: The Glass Atlas\n---\n\n# Chapter One\n\nThe journey begins."),
+		"draft-v7.md",
+	)
+
+	updatedWork, err := workRepo.FindByID(ctx, work.ID)
+	if err != nil {
+		t.Fatalf("FindByID work: %v", err)
+	}
+	if updatedWork.Title != "Writer's chosen title" {
+		t.Errorf("work title = %q, want manual title %q", updatedWork.Title, "Writer's chosen title")
+	}
+}
+
 // TestRunWorkerParseFailure is a DB-backed regression test verifying a
 // corrupt/unparseable upload delivers a "failed" WS status, creates no
 // chapters (raw binary must never reach chapters.content, D1), and — crucially
@@ -1166,6 +1470,18 @@ func TestSplitChunksCascade(t *testing.T) {
 			wantContains: "Holden",
 		},
 		{
+			name:         "uppercase character names",
+			content:      "HOLDEN\n\nThey met Holden.\n\nMILLER\n\nThey met Miller.",
+			minChunks:    2,
+			wantContains: "HOLDEN",
+		},
+		{
+			name:         "short uppercase dialogue stays in fallback content",
+			content:      "YES\n\nThe answer landed between them.\n\nNOPE\n\nNobody moved.",
+			minChunks:    1,
+			wantContains: "Untitled",
+		},
+		{
 			name:         "title case multi-word",
 			content:      "The Rocinante\n\nBody one.\n\nThe Canterbury\n\nBody two.",
 			minChunks:    2,
@@ -1202,6 +1518,68 @@ func TestSplitChunksCascade(t *testing.T) {
 	}
 }
 
+func TestSplitChunksPreservesShortUppercaseDialogue(t *testing.T) {
+	content := "YES\n\nThe answer landed between them.\n\nNOPE\n\nNobody moved."
+	chunks := (&IngestionService{}).splitChunks(content)
+	if len(chunks) != 1 {
+		t.Fatalf("chunks = %d, want one paragraph fallback", len(chunks))
+	}
+	if chunks[0].title != "Untitled" {
+		t.Fatalf("title = %q, want Untitled", chunks[0].title)
+	}
+	if chunks[0].content != content {
+		t.Fatalf("short dialogue was lost or reclassified: %q", chunks[0].content)
+	}
+}
+
+func TestSplitChunksRecognizesPDFNarrativeHeadingsAndPreservesFrontMatter(t *testing.T) {
+	content := "EL DESPERTAR DEL LEVIATÁN\nJAMES S. A. COREY\n\nPrólogo: Julie\n\nHabían tomado la Scopuli.\n\n1\n\nHolden\n\nCiento cincuenta años antes, Holden miró las estrellas.\n\n2\n\nMiller\n\nEl inspector Miller siguió la pista."
+
+	chunks := (&IngestionService{}).splitChunks(content)
+	wantTitles := []string{"Front Matter", "Prólogo: Julie", "Holden", "Miller"}
+	if len(chunks) != len(wantTitles) {
+		t.Fatalf("chunks = %d, want %d: %#v", len(chunks), len(wantTitles), chunks)
+	}
+	for i, want := range wantTitles {
+		if chunks[i].title != want {
+			t.Errorf("chunk %d title = %q, want %q", i, chunks[i].title, want)
+		}
+	}
+	if !strings.Contains(chunks[0].content, "EL DESPERTAR DEL LEVIATÁN") ||
+		!strings.Contains(chunks[1].content, "Habían tomado la Scopuli") ||
+		!strings.Contains(chunks[2].content, "Ciento cincuenta años antes") ||
+		!strings.Contains(chunks[3].content, "El inspector Miller") {
+		t.Errorf("PDF excerpt content was not retained: %#v", chunks)
+	}
+}
+
+func TestSplitChunksPreservesWaitAndStopWithinCharacterChapters(t *testing.T) {
+	content := "AMOS\n\nHe met Amos in the hall.\n\nWAIT\n\nHELP\n\nPLEASE\n\nFINE\n\nSURE\n\nThe room went quiet.\n\nBOB\n\nShe met Bob before STOP.\n\nNobody moved."
+	chunks := (&IngestionService{}).splitChunks(content)
+	if len(chunks) != 2 {
+		t.Fatalf("chunks = %d, want AMOS and BOB chapters", len(chunks))
+	}
+	if chunks[0].title != "AMOS" {
+		t.Errorf("first chapter title = %q, want AMOS", chunks[0].title)
+	}
+	for _, dialogue := range []string{"WAIT", "HELP", "PLEASE", "FINE", "SURE"} {
+		if !strings.Contains(chunks[0].content, dialogue) {
+			t.Errorf("AMOS chapter lost %q dialogue: %#v", dialogue, chunks[0])
+		}
+	}
+	if chunks[1].title != "BOB" || !strings.Contains(chunks[1].content, "STOP") {
+		t.Errorf("second chapter = %#v, want BOB retaining STOP dialogue", chunks[1])
+	}
+}
+
+func TestSplitChunksDoesNotTreatSentenceInitialDialogueAsCharacterEvidence(t *testing.T) {
+	content := "YES\n\nYes, he nodded.\n\nNO\n\nNo, she replied."
+	chunks := (&IngestionService{}).splitChunks(content)
+	if len(chunks) != 1 || chunks[0].title != "Untitled" || chunks[0].content != content {
+		t.Fatalf("sentence-initial dialogue became headings: %#v", chunks)
+	}
+}
+
 // TestIsAllCapsHeadingLine verifies the ALL-CAPS fallback heuristic.
 func TestIsAllCapsHeadingLine(t *testing.T) {
 	cases := []struct {
@@ -1217,7 +1595,7 @@ func TestIsAllCapsHeadingLine(t *testing.T) {
 		{"QUOTE,", false},       // sentence punctuation
 		{"SEMICOLON;", false},   // sentence punctuation
 		{"COLON:", false},       // sentence punctuation
-		{"DIALOGUE", false},     // no punctuation, but only 8 chars (< 10)
+		{"DIALOGUE", true},      // short uppercase headings may be character names
 	}
 
 	for _, tc := range cases {

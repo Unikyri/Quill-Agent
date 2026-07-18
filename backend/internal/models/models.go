@@ -389,6 +389,13 @@ type CraftReviewRequestPayload struct {
 	ChapterID  uuid.UUID `json:"chapter_id"`
 	Passage    string    `json:"passage"`
 	Context    string    `json:"context,omitempty"`
+	// RequestedSkills is optional. An empty list means "let Quill choose"
+	// from this universe's active skills; a non-empty list is the writer's
+	// explicit, validated selection for this passage.
+	RequestedSkills []string `json:"requested_skill_names,omitempty"`
+	// RequestID correlates this one-off request to exactly one client action.
+	// Craft responses are never safe to apply without it.
+	RequestID       string   `json:"request_id"`
 }
 
 type CraftReviewSelection struct {
@@ -409,6 +416,7 @@ type CraftReviewResultPayload struct {
 	UniverseID uuid.UUID              `json:"universe_id"`
 	WorkID     uuid.UUID              `json:"work_id"`
 	ChapterID  uuid.UUID              `json:"chapter_id"`
+	RequestID  string                 `json:"request_id"`
 	Selections []CraftReviewSelection `json:"selections"`
 	Notes      []CraftReviewNote      `json:"notes"`
 }

@@ -21,6 +21,7 @@ interface IngestJob {
 
 interface IngestPanelProps {
   universeId: string
+  workId?: string
   onClose?: () => void
   onCompleted?: (workId: string) => void | Promise<void>
   standalone?: boolean
@@ -39,7 +40,7 @@ function isTerminal(status?: string) {
   return status === 'completed' || status === 'failed'
 }
 
-export function IngestPanel({ universeId, onClose, onCompleted, standalone = false }: IngestPanelProps) {
+export function IngestPanel({ universeId, workId, onClose, onCompleted, standalone = false }: IngestPanelProps) {
   const navigate = useNavigate()
   const { publish, update } = useFeedback()
   const [jobs, setJobs] = useState<IngestJob[]>([])
@@ -262,7 +263,9 @@ export function IngestPanel({ universeId, onClose, onCompleted, standalone = fal
     activeFeedbackId.current = feedbackId
 
     try {
-      const { job_id, status } = await api.ingestDocument(universeId, file)
+      const { job_id, status } = await (workId
+        ? api.ingestDocument(universeId, file, workId)
+        : api.ingestDocument(universeId, file))
       if (!isCurrentRequest()) return false
       setActiveJobId(job_id)
       setActiveJobUniverseId(requestUniverseId)
@@ -293,7 +296,7 @@ export function IngestPanel({ universeId, onClose, onCompleted, standalone = fal
         if (inputRef.current) inputRef.current.value = ''
       }
     }
-  }, [isUploadingCurrentUniverse, loadJobs, publish, universeId, update])
+  }, [isUploadingCurrentUniverse, loadJobs, publish, universeId, update, workId])
 
   const handleDrop = (event: DragEvent<HTMLButtonElement>) => {
     event.preventDefault()

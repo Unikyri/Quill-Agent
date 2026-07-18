@@ -126,6 +126,22 @@ func (r *WorkRepo) Update(ctx context.Context, tx pgx.Tx, universeID uuid.UUID, 
 	return nil
 }
 
+// UpdateImportedTitle replaces a newly created import's provisional
+// filename-derived title after metadata has parsed cleanly. The compare-and-set
+// predicate preserves a title the writer changed while asynchronous import was
+// still running. updated is false for both a missing work and a changed title;
+// neither condition should make ingestion fail.
+func (r *WorkRepo) UpdateImportedTitle(ctx context.Context, id, universeID uuid.UUID, provisionalTitle, title string) (updated bool, err error) {
+	result, err := r.pool.Exec(ctx, `
+		UPDATE works SET title = $1, updated_at = NOW()
+		WHERE id = $2 AND universe_id = $3 AND title = $4
+	`, title, id, universeID, provisionalTitle)
+	if err != nil {
+		return false, fmt.Errorf("update imported work title: %w", err)
+	}
+	return result.RowsAffected() == 1, nil
+}
+
 func (r *WorkRepo) Delete(ctx context.Context, tx pgx.Tx, id, universeID uuid.UUID) error {
 	query := `DELETE FROM works WHERE id = $1 AND universe_id = $2`
 	result, err := tx.Exec(ctx, query, id, universeID)

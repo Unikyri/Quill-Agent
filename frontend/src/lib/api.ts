@@ -248,10 +248,11 @@ export const api = {
   // Ingestion — multipart upload, bypasses `request()`'s JSON body handling
   // since the browser must set its own `Content-Type: multipart/form-data`
   // boundary. Progress is streamed separately over WS (`ingestion_progress`).
-  ingestDocument: async (universeId: string, file: File) => {
+  ingestDocument: async (universeId: string, file: File, workId?: string) => {
     const token = localStorage.getItem('token')
     const formData = new FormData()
     formData.append('file', file)
+    if (workId) formData.append('work_id', workId)
     const res = await fetch(`${API_BASE}/universes/${universeId}/ingest`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,

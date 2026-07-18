@@ -36,6 +36,7 @@ type ingestionChunk struct {
 
 const (
 	ingestionRelationshipTimeout     = 15 * time.Second
+	ingestionDecayTimeout            = 30 * time.Second
 	ingestionRelationshipCorpusLimit = 12_000
 	ingestionRelationshipEntityLimit = 40
 	ingestionFallbackEdgeLimit       = 100
@@ -57,6 +58,15 @@ type relationshipEdgeWriter interface {
 	CreateEdge(ctx context.Context, graphName, sourceEntityID, targetEntityID, relType string, properties map[string]interface{}) error
 }
 
+// ingestionRelevance records a real imported mention and advances the
+// chapter-aware decay clock only after that chapter's mentions are durable.
+// RelevanceService satisfies this narrow interface; it remains optional for
+// older test seams and degraded deployments.
+type ingestionRelevance interface {
+	Touch(context.Context, uuid.UUID, uuid.UUID) error
+	DecayExcept(context.Context, uuid.UUID, []uuid.UUID) error
+}
+
 // IngestionService processes document uploads asynchronously:
 // file → chunk by headers → extract entities → embed → graph.
 //
@@ -71,11 +81,12 @@ type IngestionService struct {
 	relationshipEdges relationshipEdgeWriter
 	qwenSvc           IngestionQwen
 	hub               AnalysisHub
+	relevance         ingestionRelevance
 
 	// Post-ingest bounded analysis (D4) — all nil-safe, wired via
 	// SetPostIngestAnalysis. Unset means analysis is silently skipped.
-	contraSvc           *ContradictionService
-	plotHoleSvc         *PlotHoleService
+	contraSvc           postIngestContradictionAnalyzer
+	plotHoleSvc         postIngestPlotHoleAnalyzer
 	analysisBudgetMgr   *ContextBudgetManager
 	analysisMaxChapters int
 	progressNow         func() time.Time
@@ -87,6 +98,12 @@ type IngestionService struct {
 // existing ingestion tests and deployments can remain unchanged.
 func (s *IngestionService) SetStylometry(stylometry WriterCorpusObservationSink) {
 	s.stylometrySvc = stylometry
+}
+
+// SetRelevance wires canonical relevance accounting into imported mentions.
+// It is setter-based to keep the constructor stable for callers and tests.
+func (s *IngestionService) SetRelevance(relevance ingestionRelevance) {
+	s.relevance = relevance
 }
 
 // NewIngestionService creates an IngestionService. All parameters may be nil
@@ -114,6 +131,10 @@ func NewIngestionService(
 // .doc, unknown formats) get an immediate 400 instead of a garbage job row.
 var supportedFileTypes = map[string]bool{"md": true, "txt": true, "docx": true, "pdf": true}
 
+func provisionalWorkTitle(filename string) string {
+	return strings.TrimSuffix(filename, filepath.Ext(filename))
+}
+
 // ErrUnsupportedFileType is returned by Start when filename's extension isn't
 // one of supportedFileTypes.
 var ErrUnsupportedFileType = errors.New("unsupported file type — only .md, .txt, .docx, and .pdf are supported (legacy .doc? Save as .docx)")
@@ -124,6 +145,14 @@ var ErrUnsupportedFileType = errors.New("unsupported file type — only .md, .tx
 // returned and no worker is started). The caller should return 202 Accepted
 // for new jobs and 200 for duplicates.
 func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, reader io.Reader, filename string) (uuid.UUID, bool, error) {
+	return s.StartForWork(ctx, universeID, uuid.Nil, reader, filename)
+}
+
+// StartForWork starts an import for a specific Work when targetWorkID is set.
+// A missing target deliberately creates a new Work: an uploaded manuscript is
+// a distinct artifact, not extra chapters for whichever Work happens to sort
+// first in a universe.
+func (s *IngestionService) StartForWork(ctx context.Context, universeID, targetWorkID uuid.UUID, reader io.Reader, filename string) (uuid.UUID, bool, error) {
 	fileType := fileTypeOf(filename)
 	if !supportedFileTypes[fileType] {
 		return uuid.Nil, false, ErrUnsupportedFileType
@@ -141,8 +170,16 @@ func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, read
 
 	sum := sha256.Sum256(content)
 	hash := hex.EncodeToString(sum[:])
+	workTitle := provisionalWorkTitle(filename)
+	// Title extraction is intentionally best-effort here. Invalid documents
+	// still become a durable failed ingestion job in runWorker, while valid
+	// metadata makes the newly-created Work readable immediately.
+	if parsed, parseErr := parseDocumentDetails(filename, content); parseErr == nil && parsed.title != "" {
+		workTitle = parsed.title
+	}
 
 	var workID uuid.UUID
+	createdWork := false
 	if s.pool != nil {
 		repo := repositories.NewIngestionRepo(s.pool)
 		existing, err := repo.FindByContentHash(ctx, universeID, hash)
@@ -154,14 +191,11 @@ func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, read
 		}
 
 		workRepo := repositories.NewWorkRepo(s.pool)
-		works, err := workRepo.ListByUniverse(ctx, universeID)
-		if err != nil {
-			return uuid.Nil, false, fmt.Errorf("resolve work: %w", err)
-		}
-		if len(works) > 0 {
-			// ponytail: ingest into the first work. A future UI should let users
-			// pick which work to target when a universe has more than one.
-			workID = works[0].ID
+		if targetWorkID != uuid.Nil {
+			if _, err := workRepo.FindByIDInUniverse(ctx, targetWorkID, universeID); err != nil {
+				return uuid.Nil, false, fmt.Errorf("resolve target work: %w", err)
+			}
+			workID = targetWorkID
 		} else {
 			tx, err := s.pool.Begin(ctx)
 			if err != nil {
@@ -172,16 +206,10 @@ func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, read
 				_ = tx.Rollback(ctx)
 				return uuid.Nil, false, fmt.Errorf("get max order index: %w", err)
 			}
-			// Work title = filename stem. The work row is created here in
-			// Start, before the document is parsed in runWorker, so a
-			// heading-derived title (the proposal's original idea) isn't
-			// available yet — and the first heading is usually just
-			// "Chapter 1" anyway, not a useful book title.
-			title := strings.TrimSuffix(filename, filepath.Ext(filename))
 			work := models.Work{
 				ID:         uuid.New(),
 				UniverseID: universeID,
-				Title:      title,
+				Title:      workTitle,
 				Type:       "novel",
 				Status:     "in_progress",
 				OrderIndex: orderIdx + 1,
@@ -194,6 +222,7 @@ func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, read
 				return uuid.Nil, false, fmt.Errorf("commit transaction: %w", err)
 			}
 			workID = work.ID
+			createdWork = true
 		}
 
 		if err := repo.Create(ctx, jobID, universeID, workID, "pending", filename, fileType, hash); err != nil {
@@ -209,7 +238,7 @@ func (s *IngestionService) Start(ctx context.Context, universeID uuid.UUID, read
 		}
 	}
 
-	go s.runWorker(jobID, universeID, workID, content, filename)
+	go s.runWorker(jobID, universeID, workID, createdWork, content, filename)
 
 	return jobID, false, nil
 }
@@ -425,7 +454,7 @@ func paragraphSnippet(text string, at int) string {
 //
 // ponytail: synchronous per-chunk — no parallel chunk extraction to avoid
 // overwhelming the Qwen API rate limit.
-func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, content []byte, filename string) {
+func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, createdWork bool, content []byte, filename string) {
 	ctx := WithQwenRequestClass(context.Background(), QwenIngestionRequest)
 
 	s.updateJobStatus(ctx, jobID, "running", "")
@@ -446,8 +475,8 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 	// Parse the raw upload into plain text. Raw binary must never reach
 	// splitChunks/chapters.content — a parse failure or empty/whitespace-only
 	// extraction fails the job cleanly instead.
-	text, err := parseDocument(filename, content)
-	if err != nil || strings.TrimSpace(text) == "" {
+	parsed, err := parseDocumentDetails(filename, content)
+	if err != nil || strings.TrimSpace(parsed.text) == "" {
 		msg := "document contains no text"
 		if err != nil {
 			msg = err.Error()
@@ -463,10 +492,22 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 		// (the filename stem) and is user-removable via the delete-work button.
 		return
 	}
+	if createdWork && parsed.title != "" && s.pool != nil {
+		// The work is visible while import runs. Only replace the provisional
+		// filename title if it is still intact, so a manual rename wins this
+		// race instead of being silently overwritten by metadata parsing.
+		updated, err := repositories.NewWorkRepo(s.pool).UpdateImportedTitle(ctx, workID, universeID, provisionalWorkTitle(filename), parsed.title)
+		if err != nil {
+			// The imported content remains valid even if this non-critical rename
+			log.Printf("[ingestion] update imported work title: %v", err)
+		} else if !updated {
+			log.Printf("[ingestion] preserve manually renamed work %s during import", workID)
+		}
+	}
 
 	// Split parsed text into chapters (markdown/EN/ES/roman/ALL-CAPS heading
 	// cascade, falling back to paragraph-boundary chunks).
-	chunks := s.splitChunks(text)
+	chunks := s.splitChunks(parsed.text)
 	if len(chunks) == 0 {
 		s.updateJobStatus(ctx, jobID, "completed", "")
 		return
@@ -573,6 +614,11 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 		progress.finish("failed", len(chunks), entitiesTotal, "Ingestion failed.")
 		return
 	}
+
+	// An import is one relevance event, not one event per parsed chunk. Decay
+	// once after REDUCE has finished and preserve the existing chapter-aware
+	// contract by excluding the entities from the final durable chapter.
+	s.decayCompletedIngestion(ctx, universeID, ingestedChapters)
 
 	// Relationship extraction is deliberately one bounded, best-effort pass for
 	// the whole manuscript. Calling the model per chunk made ingestion serially
@@ -895,10 +941,10 @@ func regexHeadingMatches(content string, re *regexp.Regexp) []headingMatch {
 // ALL-CAPS chapter heading: short (<= 60 chars), no lowercase letters, and
 // at least 3 letters (so pure punctuation/numeral lines don't qualify).
 //
-// ponytail: 10-char minimum plus rejection of sentence-ending punctuation
-// prevents PDF artifacts like "JIM" or "THE END." from becoming fake chapters.
+// Short names are allowed only when their surrounding whitespace proves they
+// are standalone headings; sentence-ending punctuation still rejects prose.
 func isAllCapsHeadingLine(line string) bool {
-	if len(line) < 10 || len(line) > 60 {
+	if len(line) < 3 || len(line) > 60 {
 		return false
 	}
 	last := line[len(line)-1]
@@ -922,10 +968,18 @@ func isAllCapsHeadingLine(line string) bool {
 // single regex the way the other patterns are.
 func allCapsHeadingMatches(content string) []headingMatch {
 	var matches []headingMatch
+	lines := strings.Split(content, "\n")
 	offset := 0
-	for _, line := range strings.Split(content, "\n") {
+	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if isAllCapsHeadingLine(trimmed) {
+		// Short uppercase character names (for example, HOLDEN) are common
+		// manuscript chapter titles. Requiring whitespace around short lines
+		// avoids treating inline PDF fragments as chapters.
+		separated := (index == 0 || strings.TrimSpace(lines[index-1]) == "") && (index == len(lines)-1 || strings.TrimSpace(lines[index+1]) == "")
+		// A short standalone response is indistinguishable from an ALL-CAPS
+		// heading in extracted PDF text. Treat short candidates as character
+		// headings only when their Title Case form reappears in body prose.
+		if isAllCapsHeadingLine(trimmed) && (len([]rune(trimmed)) >= 10 || hasTitleCaseNameEvidence(lines, trimmed)) && (len(trimmed) >= 10 || separated) {
 			leading := len(line) - len(strings.TrimLeft(line, " \t"))
 			start := offset + leading
 			matches = append(matches, headingMatch{start: start, end: start + len(trimmed), title: trimmed})
@@ -935,11 +989,44 @@ func allCapsHeadingMatches(content string) []headingMatch {
 	return matches
 }
 
+// hasTitleCaseNameEvidence accepts a short ALL-CAPS candidate only when the
+// same name occurs after another word in a non-heading sentence. This protects
+// dialogue such as YES and NO at sentence starts without a brittle word list.
+func hasTitleCaseNameEvidence(lines []string, candidate string) bool {
+	candidateRunes := []rune(strings.ToLower(candidate))
+	if len(candidateRunes) == 0 || strings.ContainsRune(candidate, ' ') {
+		return false
+	}
+	candidateRunes[0] = unicode.ToUpper(candidateRunes[0])
+	name := string(candidateRunes)
+	for _, line := range lines {
+		if isAllCapsHeadingLine(strings.TrimSpace(line)) {
+			continue
+		}
+		for _, sentence := range strings.FieldsFunc(line, func(r rune) bool { return r == '.' || r == '!' || r == '?' }) {
+			words := strings.FieldsFunc(sentence, func(r rune) bool { return !unicode.IsLetter(r) })
+			for _, word := range words[1:] {
+				if word == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // splitByHeadings turns a set of detected heading matches into chapter
 // chunks: the body of each chunk runs from just after its heading line to
 // just before the next heading (or end of content).
 func splitByHeadings(content string, matches []headingMatch) []ingestionChunk {
-	chunks := make([]ingestionChunk, 0, len(matches))
+	chunks := make([]ingestionChunk, 0, len(matches)+1)
+	if len(matches) > 0 {
+		if preface := strings.TrimSpace(content[:matches[0].start]); preface != "" {
+			// A parser cannot always distinguish a title page or foreword from
+			// prose. Preserve it rather than silently dropping writer content.
+			chunks = append(chunks, ingestionChunk{title: "Front Matter", content: preface})
+		}
+	}
 	for i, m := range matches {
 		bodyStart := m.end + 1 // after the newline
 		var bodyEnd int
@@ -961,6 +1048,50 @@ func splitByHeadings(content string, matches []headingMatch) []ingestionChunk {
 	return chunks
 }
 
+var narrativePDFHeading = regexp.MustCompile(`(?i)^(pr[oó]logo|prologue|ep[ií]logo|epilogue)(?:\s*:\s*.+)?$`)
+var bareArabicChapterMarker = regexp.MustCompile(`^\d{1,4}\.?$`)
+
+// pdfNarrativeHeadingMatches recognises front-matter narrative sections such
+// as "Prólogo: Julie" and the common PDF layout where a bare chapter number
+// is followed by a character-named section heading. The latter is represented
+// by one match spanning both lines, so the number never becomes chapter body.
+func pdfNarrativeHeadingMatches(content string) []headingMatch {
+	type sourceLine struct {
+		start, end int
+		text       string
+	}
+
+	rawLines := strings.Split(content, "\n")
+	lines := make([]sourceLine, len(rawLines))
+	offset := 0
+	for i, raw := range rawLines {
+		trimmed := strings.TrimSpace(raw)
+		leading := len(raw) - len(strings.TrimLeftFunc(raw, unicode.IsSpace))
+		start := offset + leading
+		lines[i] = sourceLine{start: start, end: start + len(trimmed), text: trimmed}
+		offset += len(raw) + 1
+	}
+
+	matches := make([]headingMatch, 0)
+	for i, line := range lines {
+		if narrativePDFHeading.MatchString(line.text) {
+			matches = append(matches, headingMatch{start: line.start, end: line.end, title: line.text})
+			continue
+		}
+		if !bareArabicChapterMarker.MatchString(line.text) {
+			continue
+		}
+		next := i + 1
+		for next < len(lines) && lines[next].text == "" {
+			next++
+		}
+		if next < len(lines) && looksLikeTitleCaseHeading(lines[next].text) {
+			matches = append(matches, headingMatch{start: line.start, end: lines[next].end, title: lines[next].text})
+		}
+	}
+	return matches
+}
+
 // splitChunks splits document content into chapters. It tries a priority
 // cascade of heading patterns (markdown, English "Chapter N", Spanish
 // "Capítulo N", bare roman numerals, then short ALL-CAPS lines) — the first
@@ -973,7 +1104,18 @@ func (s *IngestionService) splitChunks(content string) []ingestionChunk {
 		return nil
 	}
 
-	for _, re := range headingPatterns {
+	// Explicit markdown and conventional Chapter/Capítulo markers remain the
+	// highest-confidence document structures.
+	for _, re := range headingPatterns[:4] {
+		matches := regexHeadingMatches(content, re)
+		if len(matches) >= 2 && len(matches) <= maxSaneHeadingMatches {
+			return splitByHeadings(content, matches)
+		}
+	}
+	if matches := pdfNarrativeHeadingMatches(content); len(matches) >= 1 && len(matches) <= maxSaneHeadingMatches {
+		return splitByHeadings(content, matches)
+	}
+	for _, re := range headingPatterns[4:] {
 		matches := regexHeadingMatches(content, re)
 		if len(matches) >= 2 && len(matches) <= maxSaneHeadingMatches {
 			return splitByHeadings(content, matches)
@@ -1090,9 +1232,39 @@ func (s *IngestionService) reduceMentions(ctx context.Context, universeID, chapt
 		}
 		if err := s.persistMention(ctx, entity.ID, chapterID, mention); err != nil {
 			log.Printf("[ingestion] persist mention for %s: %v", entity.Name, err)
+			continue
+		}
+		if s.relevance != nil {
+			if err := s.relevance.Touch(ctx, entity.ID, chapterID); err != nil {
+				log.Printf("[ingestion] reinforce relevance for %s: %v", entity.Name, err)
+			}
 		}
 	}
 	return resolved
+}
+
+// decayCompletedIngestion applies one chapter-aware decay tick for a completed
+// import. Only the final durable chapter is excluded, preserving the semantics
+// of a completed chapter without issuing one full-universe update per chunk.
+func (s *IngestionService) decayCompletedIngestion(ctx context.Context, universeID uuid.UUID, chapters []ingestedChapter) {
+	if s.relevance == nil || len(chapters) == 0 {
+		return
+	}
+	resolved := chapters[len(chapters)-1].Entities
+	mentioned := make([]uuid.UUID, 0, len(resolved))
+	seen := make(map[uuid.UUID]struct{}, len(resolved))
+	for _, item := range resolved {
+		if _, exists := seen[item.Entity.ID]; exists {
+			continue
+		}
+		seen[item.Entity.ID] = struct{}{}
+		mentioned = append(mentioned, item.Entity.ID)
+	}
+	decayCtx, cancel := context.WithTimeout(ctx, ingestionDecayTimeout)
+	defer cancel()
+	if err := s.relevance.DecayExcept(decayCtx, universeID, mentioned); err != nil {
+		log.Printf("[ingestion] decay after completed import: %v", err)
+	}
 }
 
 func sortMentionsForReduce(mentions []extractedMention) []extractedMention {

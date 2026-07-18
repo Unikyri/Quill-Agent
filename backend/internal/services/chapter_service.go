@@ -81,18 +81,14 @@ func (s *ChapterService) Create(ctx context.Context, workID uuid.UUID, input mod
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	// Best-effort, non-blocking: chapter creation is the "chapter advance"
-	// event that triggers relevance and writer-memory decay for the work's
-	// universe. Update is an autosave and deliberately has no decay hook.
-	if s.workRepo != nil && (s.relevSvc != nil || s.writerDecay != nil) {
+	// Creating a chapter produces an empty editing surface, not a completed
+	// chapter. Decaying here used to reduce every entity before the writer had
+	// mentioned anything. Imported/completed chapters use RelevanceService's
+	// chapter-aware decay path instead. Writer preference decay is independent.
+	if s.workRepo != nil && s.writerDecay != nil {
 		if w, err := s.workRepo.FindByID(ctx, workID); err != nil {
 			log.Printf("[chapter] decay: lookup work %s: %v", workID, err)
 		} else {
-			if s.relevSvc != nil {
-				if err := s.relevSvc.DecayAll(ctx, w.UniverseID); err != nil {
-					log.Printf("[chapter] decay universe %s: %v", w.UniverseID, err)
-				}
-			}
 			if s.writerDecay != nil {
 				decayer := s.writerDecay
 				universeID := w.UniverseID
