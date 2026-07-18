@@ -99,7 +99,7 @@ export default function FusionExplorer({ universeId, onResult }: FusionExplorerP
       <div className={styles.header}>
         <p className={styles.kicker}>Story recall</p>
         <h1 id="memory-question-title">What does Quill remember?</h1>
-        <p className={styles.intro}>Ask about your story. Quill returns the evidence it retrieved; it does not invent a prose answer when there is no matching memory.</p>
+        <p className={styles.intro}>Ask about your story. Quill retrieves source facts instead of inventing prose. Semantic matches, relationships, recent mentions, exact terms, and consolidated lore are independently ranked, then combined; a source with zero results simply did not contribute.</p>
       </div>
 
       <form className={styles.searchRow} onSubmit={(event) => { event.preventDefault(); void explain() }}>

@@ -1,5 +1,5 @@
 export type ExploreView = 'entities' | 'map' | 'timeline'
-export type ReviewView = 'issues' | 'candidates' | 'craft'
+export type ReviewView = 'issues' | 'candidates' | 'craft' | 'skills'
 
 function universeBase(universeId: string): string {
   return `/universe/${encodeURIComponent(universeId)}`

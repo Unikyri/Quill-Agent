@@ -504,6 +504,36 @@ func TestGraphRepoFullQuery(t *testing.T) {
 	}
 }
 
+// TestGraphRepoUpdateNodeState keeps the graph-visible properties aligned
+// with the canonical SQL relevance/lifecycle state.
+func TestGraphRepoUpdateNodeState(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "011")
+	if !testutil.CheckAGE(t, pool) {
+		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
+	}
+	graphName, entityID, _ := setupGraphTest(t, pool)
+	repo := NewGraphRepo(pool)
+	if err := repo.UpdateNodeState(context.Background(), graphName, entityID, 0.65, "archived"); err != nil {
+		t.Fatalf("UpdateNodeState: %v", err)
+	}
+	nodes, _, err := repo.FullQuery(context.Background(), graphName)
+	if err != nil {
+		t.Fatalf("FullQuery: %v", err)
+	}
+	for _, node := range nodes {
+		if node.ID != entityID {
+			continue
+		}
+		raw, _ := node.Properties["raw"].(string)
+		if !strings.Contains(raw, `"relevance_score": 0.65`) || !strings.Contains(raw, `"status": "archived"`) {
+			t.Fatalf("graph node properties = %s, want current score and status", raw)
+		}
+		return
+	}
+	t.Fatalf("updated graph node %s not returned", entityID)
+}
+
 // TestGraphRepoCompose tests creating two edges between the same pair to verify compose works.
 func TestGraphRepoEdgeCRUD(t *testing.T) {
 	pool := testutil.SetupTestDB(t)

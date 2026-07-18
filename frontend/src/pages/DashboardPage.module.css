@@ -122,6 +122,11 @@
   color: var(--ink);
 }
 
+.deleteButton { min-height: 42px; padding: 10px 14px; border: 1px solid var(--danger); border-radius: var(--r-md); background: transparent; color: var(--danger); cursor: pointer; font: 650 0.9rem var(--sans); }
+.deleteButton:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.dialogBackdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(18 28 28 / 58%); }
+.dialog { width: min(620px, 100%); max-height: calc(100dvh - 40px); overflow: auto; padding: clamp(20px, 4vw, 32px); border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--bg-card); box-shadow: 0 18px 60px rgb(0 0 0 / 30%); }
+
 .secondaryButton:hover:not(:disabled),
 .cardButton:hover:not(:disabled) {
   border-color: var(--teal);

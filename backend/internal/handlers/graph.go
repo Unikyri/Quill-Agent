@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
+	"github.com/quill/backend/internal/models"
 	"github.com/quill/backend/internal/repositories"
 	"github.com/quill/backend/internal/services"
 )
@@ -17,6 +19,10 @@ import (
 type graphQuerier interface {
 	FullQuery(ctx context.Context, graphName string) ([]repositories.GraphNode, []repositories.GraphEdge, error)
 	BoundedNHopTraversal(ctx context.Context, graphName string, startNodeID string, hops int) (repositories.GraphTraversalResult, error)
+}
+
+type graphEntityInventory interface {
+	ListGraphInventory(ctx context.Context, universeID uuid.UUID) ([]models.Entity, error)
 }
 
 // graphTraversalTimeout bounds an AGE request without setting mutable session
@@ -46,7 +52,7 @@ type writerMemoryDecayer interface {
 type GraphHandler struct {
 	graphRepo     graphQuerier
 	memorySvc     *services.MemoryService
-	entityRepo    *repositories.EntityRepo
+	entityRepo    graphEntityInventory
 	embedder      queryEmbedder
 	decayer       Decayer
 	writerDecayer writerMemoryDecayer
@@ -105,14 +111,12 @@ func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
 	if err != nil {
 		// ponytail: AGE throws "graph does not exist" for new universes; return empty 200
 		if strings.Contains(err.Error(), "does not exist") {
-			return c.JSON(fiber.Map{
-				"nodes": []repositories.GraphNode{},
-				"edges": []repositories.GraphEdge{},
+			nodes, edges = []repositories.GraphNode{}, []repositories.GraphEdge{}
+		} else {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
 			})
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
-		})
 	}
 
 	if nodes == nil {
@@ -121,11 +125,56 @@ func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
 	if edges == nil {
 		edges = []repositories.GraphEdge{}
 	}
+	if h.entityRepo != nil {
+		inventory, inventoryErr := h.entityRepo.ListGraphInventory(c.Context(), universeID)
+		if inventoryErr != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fiber.Map{"code": "INTERNAL_ERROR", "message": inventoryErr.Error()},
+			})
+		}
+		nodes = reconcileGraphInventory(nodes, inventory)
+	}
 
 	return c.JSON(fiber.Map{
 		"nodes": nodes,
 		"edges": edges,
 	})
+}
+
+// reconcileGraphInventory adds registry entities that AGE does not contain.
+// It never creates edges: an isolated SQL-backed node means relationships are
+// not currently available, not that the entity has no relationships in lore.
+func reconcileGraphInventory(nodes []repositories.GraphNode, inventory []models.Entity) []repositories.GraphNode {
+	known := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		known[node.ID] = struct{}{}
+	}
+	for _, entity := range inventory {
+		id := entity.ID.String()
+		if _, exists := known[id]; exists {
+			continue
+		}
+		raw, err := json.Marshal(map[string]interface{}{
+			"entity_id":       id,
+			"name":            entity.Name,
+			"label":           entity.Type,
+			"status":          entity.Status,
+			"relevance_score": entity.RelevanceScore,
+		})
+		if err != nil {
+			continue
+		}
+		nodes = append(nodes, repositories.GraphNode{
+			ID:     id,
+			Labels: []string{entity.Type},
+			Properties: map[string]interface{}{
+				"raw":          string(raw),
+				"graph_backed": false,
+			},
+		})
+		known[id] = struct{}{}
+	}
+	return nodes
 }
 
 // Neighbors returns the N-hop neighbors of a graph entity.

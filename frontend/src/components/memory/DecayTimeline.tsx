@@ -149,6 +149,7 @@ export default function DecayTimeline({ universeId }: DecayTimelineProps) {
         </div>
         <button className={styles.advanceBtn} type="button" onClick={() => void handleRunDecay()} disabled={running}>{running ? 'Running sweep…' : 'Run a decay sweep'}</button>
       </div>
+      <p className={styles.summary}>Each line is one entity’s relevance history. Higher means it has been mentioned more recently; the dashed line is the archive threshold (15%). ▼ marks a move into archive and ▲ a later reactivation. A sweep recomputes these scores from existing mentions; it does not analyze new prose.</p>
       <p className={styles.summary}>{consolidatedCount} {consolidatedCount === 1 ? 'consolidated memory is' : 'consolidated memories are'} currently available to recall.</p>
       {hasCurrentError && <div className={styles.degraded} role="status">Could not refresh the lifecycle. Showing the last available data. <button type="button" onClick={() => void loadStatus()}>Retry</button></div>}
       {runError && <div className={styles.degraded} role="alert">{runError} <button type="button" onClick={() => void handleRunDecay()}>Retry sweep</button></div>}

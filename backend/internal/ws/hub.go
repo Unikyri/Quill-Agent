@@ -3,8 +3,10 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,12 +84,16 @@ type Hub struct {
 	chapterRepo   ChapterOwnershipResolver
 	craftReviewer CraftReviewer
 	craftSlots    chan struct{}
+	craftTimeout  time.Duration
 }
 
 const (
 	maxCraftReviewsInFlight = 4
 	maxCraftPassageBytes    = 16 * 1024
 	maxCraftContextBytes    = 4 * 1024
+	// The browser gives feedback after 45 seconds. Finish or cancel server work
+	// before then, leaving a small delivery window for the tagged WS response.
+	defaultCraftReviewTimeout = 40 * time.Second
 )
 
 // AuthValidator is the minimal auth interface used by Hub.
@@ -106,6 +112,7 @@ func NewHub(authSvc AuthValidator, submitter ParagraphSubmitter, recaller Recall
 		recaller:   recaller,
 		embedder:   embedder,
 		craftSlots: make(chan struct{}, maxCraftReviewsInFlight),
+		craftTimeout: defaultCraftReviewTimeout,
 	}
 }
 
@@ -138,6 +145,18 @@ func (h *Hub) SetCraftReviewer(reviewer CraftReviewer) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.craftReviewer = reviewer
+}
+
+// SetCraftReviewTimeout is primarily useful for deterministic tests. Production
+// uses the 40-second default, deliberately below the browser's 45-second UI
+// deadline so a timed-out review releases its global slot before the UI gives up.
+func (h *Hub) SetCraftReviewTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		timeout = defaultCraftReviewTimeout
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.craftTimeout = timeout
 }
 
 // Register adds a connection to the hub for the given user.
@@ -255,18 +274,7 @@ func (h *Hub) Handle(wsConn *websocket.Conn) {
 		case TypeRecallRequest:
 			h.handleRecallRequest(userID, msg)
 		case TypeCraftReviewRequest:
-			// Craft review performs two model calls and optional memory recall. Keep
-			// the read loop responsive so paragraph submissions and reconnects are
-			// not blocked while the review is running.
-			select {
-			case h.craftSlots <- struct{}{}:
-				go func() {
-					defer func() { <-h.craftSlots }()
-					h.handleCraftReviewRequest(userID, msg)
-				}()
-			default:
-				h.sendCraftError(userID, "craft review queue is busy; try again shortly")
-			}
+			h.dispatchCraftReview(userID, msg)
 		default:
 			log.Printf("[ws] unknown message type from user %s: %s", userID, msg.Type)
 		}
@@ -401,28 +409,72 @@ func (h *Hub) authorizeContentScope(userID, universeID, workID, chapterID uuid.U
 	return true
 }
 
-func (h *Hub) handleCraftReviewRequest(userID uuid.UUID, msg WSMessage) {
+func (h *Hub) dispatchCraftReview(userID uuid.UUID, msg WSMessage) {
+	requestID := craftRequestID(msg)
+	if requestID == "" {
+		log.Printf("[ws] craft_review_request rejected without request_id")
+		return
+	}
+	// Craft review performs two model calls and optional memory recall. Keep the
+	// read loop responsive while a bounded worker owns one global slot.
+	select {
+	case h.craftSlots <- struct{}{}:
+		go func() {
+			defer func() { <-h.craftSlots }()
+			ctx, cancel := context.WithTimeout(context.Background(), h.craftReviewTimeout())
+			defer cancel()
+			h.handleCraftReviewRequest(ctx, userID, msg)
+		}()
+	default:
+		h.sendCraftError(userID, requestID, "craft review queue is busy; try again shortly")
+	}
+}
+
+func (h *Hub) craftReviewTimeout() time.Duration {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.craftTimeout <= 0 {
+		return defaultCraftReviewTimeout
+	}
+	return h.craftTimeout
+}
+
+func (h *Hub) handleCraftReviewRequest(ctx context.Context, userID uuid.UUID, msg WSMessage) {
 	var payload models.CraftReviewRequestPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		log.Printf("[ws] parse craft_review_request: %v", err)
 		return
 	}
+	payload.RequestID = strings.TrimSpace(payload.RequestID)
+	if payload.RequestID == "" {
+		log.Printf("[ws] craft_review_request rejected without request_id")
+		return
+	}
 	if payload.UniverseID == uuid.Nil || payload.WorkID == uuid.Nil || payload.ChapterID == uuid.Nil || payload.Passage == "" || len(payload.Passage) > maxCraftPassageBytes || len(payload.Context) > maxCraftContextBytes {
-		h.sendCraftError(userID, "invalid craft review request")
+		h.sendCraftError(userID, payload.RequestID, "invalid craft review request")
 		return
 	}
 	if h.craftReviewer == nil {
-		h.sendCraftError(userID, "craft review service is unavailable")
+		h.sendCraftError(userID, payload.RequestID, "craft review service is unavailable")
 		return
 	}
 	if !h.authorizeContentScope(userID, payload.UniverseID, payload.WorkID, payload.ChapterID) {
-		h.sendCraftError(userID, "universe access denied")
+		h.sendCraftError(userID, payload.RequestID, "universe access denied")
 		return
 	}
-	result, err := h.craftReviewer.Review(context.Background(), userID, payload)
+	result, err := h.reviewCraft(ctx, userID, payload)
 	if err != nil {
 		log.Printf("[ws] craft review: %v", err)
-		h.sendCraftError(userID, "craft review failed")
+		if errors.Is(err, context.DeadlineExceeded) {
+			h.sendCraftError(userID, payload.RequestID, "craft review timed out; try again shortly")
+		} else {
+			h.sendCraftError(userID, payload.RequestID, "craft review failed")
+		}
+		return
+	}
+	if result.RequestID != payload.RequestID {
+		log.Printf("[ws] craft review returned mismatched request ID")
+		h.sendCraftError(userID, payload.RequestID, "craft review failed")
 		return
 	}
 	response, err := NewMessage(TypeCraftReviewResult, result)
@@ -435,14 +487,63 @@ func (h *Hub) handleCraftReviewRequest(userID uuid.UUID, msg WSMessage) {
 	}
 }
 
-func (h *Hub) sendCraftError(userID uuid.UUID, message string) {
-	msg, err := NewMessage(TypeError, map[string]string{"error": message, "message": message})
+type craftReviewOutcome struct {
+	result models.CraftReviewResultPayload
+	err    error
+}
+
+// reviewCraft returns as soon as the request context expires. The result channel
+// is buffered so a non-cooperative dependency can finish without leaking a
+// goroutine, while compliant LLM/database calls receive the cancellation signal.
+func (h *Hub) reviewCraft(ctx context.Context, userID uuid.UUID, payload models.CraftReviewRequestPayload) (models.CraftReviewResultPayload, error) {
+	result := models.CraftReviewResultPayload{
+		UniverseID: payload.UniverseID, WorkID: payload.WorkID, ChapterID: payload.ChapterID,
+		RequestID: payload.RequestID, Selections: []models.CraftReviewSelection{}, Notes: []models.CraftReviewNote{},
+	}
+	reviewer := h.craftReviewer
+	if reviewer == nil {
+		return result, fmt.Errorf("craft review service is unavailable")
+	}
+	outcomes := make(chan craftReviewOutcome, 1)
+	go func() {
+		review, err := reviewer.Review(ctx, userID, payload)
+		outcomes <- craftReviewOutcome{result: review, err: err}
+	}()
+
+	select {
+	case outcome := <-outcomes:
+		return outcome.result, outcome.err
+	case <-ctx.Done():
+		return result, ctx.Err()
+	}
+}
+
+func craftRequestID(msg WSMessage) string {
+	var payload struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.RequestID)
+}
+
+func (h *Hub) sendCraftError(userID uuid.UUID, requestID, message string) {
+	msg, err := newCraftErrorMessage(requestID, message)
 	if err != nil {
 		return
 	}
 	if err := h.SendToUser(userID, msg); err != nil {
 		log.Printf("[ws] send craft review error: %v", err)
 	}
+}
+
+func newCraftErrorMessage(requestID, message string) (WSMessage, error) {
+	if strings.TrimSpace(requestID) == "" {
+		return WSMessage{}, fmt.Errorf("craft review errors require request_id")
+	}
+	payload := map[string]string{"error": message, "message": message, "request_id": requestID}
+	return NewMessage(TypeError, payload)
 }
 
 func (h *Hub) sendAnalysisFailure(userID uuid.UUID, submitted models.ParagraphSubmitPayload, reason string) {

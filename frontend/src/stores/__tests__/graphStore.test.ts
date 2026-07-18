@@ -236,6 +236,20 @@ describe('graphStore', () => {
   })
 
   describe('focusNode', () => {
+    it('keeps entity-type filters while loading a new focal neighborhood', async () => {
+      useGraphStore.setState({
+        _universeId: 'uni-1',
+        focalNodeId: 'n1',
+        nodeFilter: { character: false, place: true, object: true, event: true, faction: true, world_rule: true, plot_arc: true },
+      })
+      mockGetEntityNeighbors.mockResolvedValueOnce({ nodes: [graphNode('n2', 'Focused')], edges: [], truncated: false, limits: graphLimits })
+
+      await getStore().focusNode('n2')
+
+      expect(getStore().nodeFilter.character).toBe(false)
+      expect(getStore().focalNodeId).toBe('n2')
+    })
+
     it('keeps the newest focal selection when earlier clicks resolve late', async () => {
       const firstFocus = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[]; truncated: boolean; limits: typeof graphLimits }>()
       const secondFocus = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[]; truncated: boolean; limits: typeof graphLimits }>()

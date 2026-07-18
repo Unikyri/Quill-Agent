@@ -22,6 +22,7 @@
 .observation { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; border: 1px solid var(--line, #d7cfc2); border-radius: 7px; padding: 9px 10px; background: #f5f1e8; color: var(--muted, #776f65); font-size: 12px; }
 .observation strong { color: var(--ink, #24333a); font-size: 14px; }
 .observation small { grid-column: 1 / -1; color: var(--muted, #776f65); }
+.observation p { grid-column: 1 / -1; margin: 2px 0 0; color: var(--muted, #776f65); font-size: 11px; line-height: 1.4; }
 .state { color: var(--muted, #776f65); padding: 16px 0; }
 .error { color: #9d3e36; }
 .error p { margin: 0 0 8px; }

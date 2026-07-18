@@ -37,7 +37,7 @@ export default function NodeDrawer() {
       )}
       {typeof relevanceScore === 'number' && (
         <div className={styles.drawerField}>
-          <span className={styles.drawerFieldKey}>Relevance</span>
+          <span className={styles.drawerFieldKey} title="Relative score from recent mentions and memory activity; not a quality grade.">Story relevance</span>
           <span className={styles.drawerFieldValue}>{Math.round(relevanceScore * 100)}%</span>
         </div>
       )}

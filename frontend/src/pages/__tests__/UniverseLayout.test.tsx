@@ -105,7 +105,7 @@ describe('UniverseLayout', () => {
 
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/dashboard')
     expect(screen.getByRole('link', { name: 'Write' })).toHaveAttribute('href', '/universe/uni-1/write')
-    expect(screen.getByRole('link', { name: 'Explore' })).toHaveAttribute('href', '/universe/uni-1/explore/entities')
+    expect(screen.getByRole('link', { name: 'Map' })).toHaveAttribute('href', '/universe/uni-1/explore/map')
     expect(screen.getByRole('link', { name: 'Memory' })).toHaveAttribute('href', '/universe/uni-1/memory')
     expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/universe/uni-1/review/issues')
     expect(screen.queryByText('Works & Chapters')).not.toBeInTheDocument()
@@ -210,7 +210,7 @@ describe('UniverseLayout', () => {
     await waitFor(() => expect(screen.getByText('Write content')).toBeInTheDocument())
 
     fireEvent.keyDown(window, { key: '3', altKey: true })
-    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/explore/entities')
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/explore/map')
   })
 
   it('retries the actual universe and work requests after a load failure', async () => {

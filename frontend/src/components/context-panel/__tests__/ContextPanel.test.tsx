@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import ContextPanel from '../ContextPanel'
 import { useWSStore } from '../../../stores/wsStore'
 import { api } from '../../../lib/api'
@@ -29,6 +30,21 @@ beforeEach(() => {
 })
 
 describe('ContextPanel', () => {
+  it('toggles a collapsed disclosure section', async () => {
+    const user = userEvent.setup()
+    render(<ContextPanel status="idle" />)
+
+    const summary = screen.getByText('Relevant memory')
+    const disclosure = summary.closest('details')
+    expect(disclosure).toHaveProperty('open', false)
+
+    await user.click(summary)
+    expect(disclosure).toHaveProperty('open', true)
+
+    await user.click(summary)
+    expect(disclosure).toHaveProperty('open', false)
+  })
+
   it('shows empty state when no messages', () => {
     render(<ContextPanel status="idle" />)
     expect(screen.getByText('AI contradiction analysis will appear here')).toBeInTheDocument()

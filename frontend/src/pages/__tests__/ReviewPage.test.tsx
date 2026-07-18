@@ -108,6 +108,7 @@ describe('ReviewPage', () => {
   it('does not pretend craft reviews are persisted', () => {
     renderPage('craft')
     expect(screen.getByText(/does not provide a persisted craft-notes inbox/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Manage editorial skills' })).toHaveAttribute('href', '/universe/uni-1/review/skills')
     expect(screen.getByRole('link', { name: /open write and review a selection/i })).toHaveAttribute('href', '/universe/uni-1/write')
   })
 

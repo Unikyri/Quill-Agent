@@ -22,8 +22,8 @@
 .filterBar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
-  padding: 12px 14px;
+  gap: 0.45rem;
+  padding: 0.65rem;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--bg-card);
@@ -32,7 +32,12 @@
 .filterLabel {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.38rem;
+  min-height: 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--bg-input);
+  padding: 0.22rem 0.58rem;
   cursor: pointer;
   color: var(--ink-soft);
   font: 600 12px var(--sans);
@@ -41,6 +46,17 @@
 .filterCheckbox {
   accent-color: var(--teal);
   cursor: pointer;
+}
+
+.filterLabel:has(.filterCheckbox:checked) {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal-deep);
+}
+
+.filterLabel:has(.filterCheckbox:focus-visible) {
+  outline: 3px solid var(--teal-soft-12);
+  outline-offset: 2px;
 }
 
 .filterBadge {

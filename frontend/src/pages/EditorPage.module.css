@@ -2,7 +2,9 @@
 .wrap {
   display: grid;
   grid-template-columns: var(--chapter-panel-width) minmax(0, 1fr) var(--context-panel-width);
-  height: 100%;
+  height: calc(100vh - 3.75rem);
+  height: calc(100dvh - 3.75rem);
+  min-height: 0;
   overflow: hidden;
   background: var(--bg-app);
   position: relative;
@@ -132,6 +134,7 @@
 .railList {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px 0;
 }
 
@@ -208,6 +211,7 @@
   overflow: hidden;
   background: var(--bg-app);
   min-width: 0;
+  min-height: 0;
 }
 
 .headerBar {
@@ -412,17 +416,27 @@
 .contextContent {
   height: 100%;
   min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 12px;
 }
 
 .contextStack {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 100%;
   min-width: 0;
 }
 
 .contextAnalysis {
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.contextAnalysis > * {
+  width: 100% !important;
+  height: 100%;
   min-height: 0;
 }
 
@@ -440,7 +454,8 @@
 
 .panelToggle {
   position: absolute;
-  top: 12px;
+  top: 50%;
+  bottom: auto;
   z-index: 2;
   width: 22px;
   height: 28px;
@@ -452,7 +467,13 @@
   font-size: 19px;
   line-height: 1;
   cursor: pointer;
+  transform: translateY(-50%);
   transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.panelCollapsed .panelToggle {
+  top: 12px;
+  transform: none;
 }
 
 .panelToggle:hover,
@@ -543,4 +564,11 @@
   .headerRight { gap: 8px; }
   .importOverlay { padding: 10px; }
   .editorNotice { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 640px) {
+  .wrap {
+    height: calc(100vh - 3.35rem);
+    height: calc(100dvh - 3.35rem);
+  }
 }

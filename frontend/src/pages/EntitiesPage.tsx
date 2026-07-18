@@ -143,13 +143,13 @@ function EntityDetail({ entityId, universeId }: { entityId: string; universeId: 
       {/* Relevance */}
       <div className={styles.relevanceCard}>
         <div className={styles.relevanceHeader}>
-          <span className={styles.relevanceTitle}>Relevance</span>
+          <span className={styles.relevanceTitle}>Story relevance</span>
           <span className={styles.relevanceScore}>{relevancePct}</span>
         </div>
         <div className={styles.relevanceBar}>
           <div className={styles.relevanceFill} style={{ width: `${relevancePct}%`, background: meta.color }} />
         </div>
-        <p className={styles.relevanceNote}>How central this entity is to the universe, according to AI.</p>
+        <p className={styles.relevanceNote}>A relative score from recent mentions and memory activity. It is not a quality grade.</p>
       </div>
 
       {/* Relations */}

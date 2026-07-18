@@ -94,6 +94,7 @@ function jitter(base: number): number {
 interface WSState {
   status: WSStatus
   lastError: string | null
+  lastErrorRequestId: string | null
   reconnectAttempt: number
   activeUniverseId: string | null
   analysisResults: AnalysisResult[]
@@ -112,6 +113,7 @@ interface WSState {
   connect: (token: string) => void
   disconnect: () => void
   send: (msg: WSMessage) => void
+  clearError: () => void
   _clearSlices: () => void
 }
 
@@ -206,10 +208,13 @@ export const useWSStore = create<WSState>((set, get) => {
     const payload = msg.payload || {}
     switch (msg.type) {
       case 'auth_ok':
-        set({ lastError: null })
+        set({ lastError: null, lastErrorRequestId: null })
         break
       case 'error':
-        set({ lastError: (payload.message as string) || (payload.error as string) || 'Unknown WS error' })
+        set({
+          lastError: (payload.message as string) || (payload.error as string) || 'Unknown WS error',
+          lastErrorRequestId: typeof payload.request_id === 'string' ? payload.request_id : null,
+        })
         break
       case 'analysis_result':
         if (!isInActiveUniverseScope(payload)) break
@@ -299,6 +304,9 @@ export const useWSStore = create<WSState>((set, get) => {
       }
       case 'craft_review_result':
         if (!isInActiveUniverseScope(payload)) break
+        // Craft reviews are request-scoped. A result without its correlation ID
+        // cannot be safely associated with an editor selection, so discard it.
+        if (typeof payload.request_id !== 'string' || !payload.request_id.trim()) break
         set({ craftReviews: [...get().craftReviews, payload as unknown as CraftReviewResult].slice(-20) })
         break
       default:
@@ -333,7 +341,7 @@ export const useWSStore = create<WSState>((set, get) => {
       socket = new WebSocket(WS_URL)
     ws = socket
     } catch {
-      set({ status: 'closed', lastError: 'WebSocket constructor failed' })
+      set({ status: 'closed', lastError: 'WebSocket constructor failed', lastErrorRequestId: null })
       scheduleReconnect(token, attempt)
       return
     }
@@ -342,7 +350,7 @@ export const useWSStore = create<WSState>((set, get) => {
 
     socket.onopen = () => {
       if (ws !== socket) return
-      set({ status: 'open', lastError: null })
+      set({ status: 'open', lastError: null, lastErrorRequestId: null })
       // Send auth_init
       socket.send(JSON.stringify({ type: 'auth_init', payload: { token } }))
       const queued = outboundQueue
@@ -357,7 +365,7 @@ export const useWSStore = create<WSState>((set, get) => {
         const msg = JSON.parse(event.data as string)
         dispatch(msg)
       } catch {
-        set({ lastError: 'Failed to parse WS message' })
+        set({ lastError: 'Failed to parse WS message', lastErrorRequestId: null })
       }
     }
 
@@ -372,7 +380,7 @@ export const useWSStore = create<WSState>((set, get) => {
         return
       }
       failInFlightSubmissions('Connection lost before analysis completed.')
-      set({ lastError: 'Connection lost' })
+      set({ lastError: 'Connection lost', lastErrorRequestId: null })
       scheduleReconnect(token, attempt)
     }
   }
@@ -380,6 +388,7 @@ export const useWSStore = create<WSState>((set, get) => {
   return {
     status: 'idle',
     lastError: null,
+    lastErrorRequestId: null,
     reconnectAttempt: 0,
     activeUniverseId: null,
     analysisResults: [],
@@ -448,6 +457,8 @@ export const useWSStore = create<WSState>((set, get) => {
       }
       ws.send(JSON.stringify(msg))
     },
+
+    clearError: () => set({ lastError: null, lastErrorRequestId: null }),
 
     _clearSlices: () => {
       set({

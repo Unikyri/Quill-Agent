@@ -29,6 +29,7 @@ vi.mock('../pages/TimelinePage', () => ({ default: () => <div>Timeline route</di
 vi.mock('../pages/KnowledgeGraphPage', () => ({ default: () => <div>Map route</div> }))
 vi.mock('../pages/MemoryInspectorPage', () => ({ default: () => <div>Memory route</div> }))
 vi.mock('../pages/ReviewPage', () => ({ default: () => <div>Review route</div> }))
+vi.mock('../pages/SkillsPage', () => ({ default: () => <div>Skills route</div> }))
 
 function LocationProbe() {
   const location = useLocation()
@@ -61,7 +62,7 @@ describe('App legacy universe routes', () => {
     ['timeline', '/universe/uni-1/timeline', '/universe/uni-1/explore/timeline'],
     ['contradictions', '/universe/uni-1/contradictions', '/universe/uni-1/review/issues'],
     ['plot holes', '/universe/uni-1/plot-holes', '/universe/uni-1/review/issues'],
-    ['skills', '/universe/uni-1/skills', '/universe/uni-1/review/craft'],
+    ['skills', '/universe/uni-1/skills', '/universe/uni-1/review/skills'],
     ['panorama', '/universe/uni-1/panorama', '/dashboard'],
     ['universe wildcard', '/universe/uni-1/not-a-real-route', '/universe/uni-1/write'],
   ])('redirects legacy %s route to the canonical destination', async (_name, legacyPath, expectedPath) => {

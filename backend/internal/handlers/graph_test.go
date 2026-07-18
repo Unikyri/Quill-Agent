@@ -180,6 +180,15 @@ type fakeUniverseOwnerResolver struct {
 	universe *models.Universe
 }
 
+type fakeGraphInventory struct {
+	entities []models.Entity
+	err      error
+}
+
+func (f fakeGraphInventory) ListGraphInventory(_ context.Context, _ uuid.UUID) ([]models.Entity, error) {
+	return f.entities, f.err
+}
+
 func (f fakeUniverseOwnerResolver) FindByID(_ context.Context, _ uuid.UUID) (*models.Universe, error) {
 	return f.universe, nil
 }
@@ -348,13 +357,18 @@ func TestNewGraphHandler(t *testing.T) {
 
 type stubGraphQuerier struct {
 	errorMsg    string
+	nodes       []repositories.GraphNode
+	edges       []repositories.GraphEdge
 	traversal   repositories.GraphTraversalResult
 	gotHops     int
 	sawDeadline bool
 }
 
 func (s *stubGraphQuerier) FullQuery(_ context.Context, _ string) ([]repositories.GraphNode, []repositories.GraphEdge, error) {
-	return nil, nil, &stubQuerierErr{msg: s.errorMsg}
+	if s.errorMsg != "" {
+		return nil, nil, &stubQuerierErr{msg: s.errorMsg}
+	}
+	return s.nodes, s.edges, nil
 }
 func (s *stubGraphQuerier) BoundedNHopTraversal(ctx context.Context, _ string, _ string, hops int) (repositories.GraphTraversalResult, error) {
 	s.gotHops = hops
@@ -451,7 +465,7 @@ func TestGraphHandlerFullGraphMissingGraph(t *testing.T) {
 	h := &GraphHandler{
 		graphRepo:  stub,
 		memorySvc:  services.NewMemoryService(nil, nil, nil),
-		entityRepo: repositories.NewEntityRepo(nil),
+		entityRepo: fakeGraphInventory{},
 	}
 	app.Get("/api/v1/universes/:universe_id/graph", h.FullGraph)
 
@@ -478,5 +492,58 @@ func TestGraphHandlerFullGraphMissingGraph(t *testing.T) {
 	}
 	if string(nodes) != "[]" || string(edges) != "[]" {
 		t.Errorf("expected empty arrays, got nodes=%s edges=%s", nodes, edges)
+	}
+}
+
+func TestGraphHandlerFullGraphReconcilesSQLOnlyEntities(t *testing.T) {
+	app := fiber.New()
+	universeID := uuid.New()
+	ageEntityID := uuid.New()
+	sqlOnlyID := uuid.New()
+	stub := &stubGraphQuerier{nodes: []repositories.GraphNode{{ID: ageEntityID.String()}}}
+	h := &GraphHandler{
+		graphRepo: stub,
+		memorySvc: services.NewMemoryService(nil, nil, nil),
+		entityRepo: fakeGraphInventory{entities: []models.Entity{
+			{ID: ageEntityID, UniverseID: universeID, Name: "Graph resident", Type: "character", Status: "active"},
+			{ID: sqlOnlyID, UniverseID: universeID, Name: "Registry only", Type: "location", Status: "active", RelevanceScore: 0.4},
+		}},
+	}
+	app.Get("/api/v1/universes/:universe_id/graph", h.FullGraph)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/universes/"+universeID.String()+"/graph", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Nodes []repositories.GraphNode `json:"nodes"`
+		Edges []repositories.GraphEdge `json:"edges"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Nodes) != 2 {
+		t.Fatalf("nodes = %#v, want AGE node plus SQL-only entity", body.Nodes)
+	}
+	if len(body.Edges) != 0 {
+		t.Fatalf("edges = %#v, want no fabricated relationships", body.Edges)
+	}
+	var reconciled *repositories.GraphNode
+	for index := range body.Nodes {
+		if body.Nodes[index].ID == sqlOnlyID.String() {
+			reconciled = &body.Nodes[index]
+			break
+		}
+	}
+	if reconciled == nil || reconciled.Properties["graph_backed"] != false {
+		t.Fatalf("SQL-only entity was not honestly marked: %#v", reconciled)
+	}
+	raw, _ := reconciled.Properties["raw"].(string)
+	if !strings.Contains(raw, "Registry only") {
+		t.Fatalf("SQL-only node raw payload = %q, want entity metadata", raw)
 	}
 }

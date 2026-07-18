@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -272,20 +273,89 @@ func TestHubCraftReviewScopesAndDispatches(t *testing.T) {
 	)
 	payload, _ := json.Marshal(models.CraftReviewRequestPayload{
 		UniverseID: universeID, WorkID: workID, ChapterID: chapterID, Passage: "A passage to review",
+		RequestID: "review-request-1",
 	})
-	hub.handleCraftReviewRequest(userID, WSMessage{Type: TypeCraftReviewRequest, Payload: payload})
+	hub.handleCraftReviewRequest(context.Background(), userID, WSMessage{Type: TypeCraftReviewRequest, Payload: payload})
 	if !mockReviewer.called {
 		t.Fatal("craft reviewer was not called")
 	}
 	if mockReviewer.request.Passage != "A passage to review" {
 		t.Fatalf("passage = %q", mockReviewer.request.Passage)
 	}
+	if mockReviewer.request.RequestID != "review-request-1" {
+		t.Fatalf("request ID = %q, want review-request-1", mockReviewer.request.RequestID)
+	}
 
 	foreign := &mockCraftReviewer{}
 	hub.SetCraftReviewer(foreign)
-	hub.handleCraftReviewRequest(uuid.New(), WSMessage{Type: TypeCraftReviewRequest, Payload: payload})
+	hub.handleCraftReviewRequest(context.Background(), uuid.New(), WSMessage{Type: TypeCraftReviewRequest, Payload: payload})
 	if foreign.called {
 		t.Fatal("foreign craft review must be rejected before dispatch")
+	}
+}
+
+func TestCraftReviewErrorCarriesRequestID(t *testing.T) {
+	message, err := newCraftErrorMessage("review-request-1", "craft review failed")
+	if err != nil {
+		t.Fatalf("new craft error: %v", err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(message.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal craft error: %v", err)
+	}
+	if payload["request_id"] != "review-request-1" {
+		t.Fatalf("request_id = %q, want review-request-1", payload["request_id"])
+	}
+	if payload["message"] != "craft review failed" {
+		t.Fatalf("message = %q", payload["message"])
+	}
+}
+
+func TestHubCraftReviewRequiresRequestID(t *testing.T) {
+	reviewer := &mockCraftReviewer{}
+	hub := NewHub(nil, nil, nil, nil)
+	hub.SetCraftReviewer(reviewer)
+	payload, _ := json.Marshal(models.CraftReviewRequestPayload{
+		UniverseID: uuid.New(), WorkID: uuid.New(), ChapterID: uuid.New(), Passage: "A passage to review",
+	})
+	hub.handleCraftReviewRequest(context.Background(), uuid.New(), WSMessage{Type: TypeCraftReviewRequest, Payload: payload})
+	if reviewer.called {
+		t.Fatal("craft review without request_id must not reach the reviewer")
+	}
+}
+
+func TestHubCraftReviewDeadlineCancelsWorkAndReleasesSlot(t *testing.T) {
+	reviewer := &deadlineCraftReviewer{started: make(chan struct{}), ended: make(chan struct{})}
+	hub := NewHub(nil, nil, nil, nil)
+	hub.SetCraftReviewer(reviewer)
+	hub.SetCraftReviewTimeout(20 * time.Millisecond)
+	userID := uuid.New()
+	universeID, workID, chapterID := uuid.New(), uuid.New(), uuid.New()
+	hub.SetUniverseOwnerResolver(mockUniverseOwnerResolver{universe: &models.Universe{ID: universeID, UserID: userID}})
+	hub.SetParagraphOwnershipResolvers(
+		mockWorkOwnershipResolver{work: &models.Work{ID: workID, UniverseID: universeID}},
+		mockChapterOwnershipResolver{chapter: &models.Chapter{ID: chapterID, WorkID: workID, UniverseID: universeID}},
+	)
+	payload, _ := json.Marshal(models.CraftReviewRequestPayload{
+		UniverseID: universeID, WorkID: workID, ChapterID: chapterID, Passage: "A passage to review", RequestID: "deadline-request",
+	})
+	hub.dispatchCraftReview(userID, WSMessage{Type: TypeCraftReviewRequest, Payload: payload})
+	select {
+	case <-reviewer.started:
+	case <-time.After(time.Second):
+		t.Fatal("craft review did not start")
+	}
+	select {
+	case <-reviewer.ended:
+	case <-time.After(time.Second):
+		t.Fatal("craft review did not receive the deadline cancellation")
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(hub.craftSlots) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(hub.craftSlots) != 0 {
+		t.Fatalf("craft slot still occupied after deadline: %d", len(hub.craftSlots))
 	}
 }
 
@@ -404,7 +474,19 @@ type mockCraftReviewer struct {
 func (m *mockCraftReviewer) Review(_ context.Context, _ uuid.UUID, request models.CraftReviewRequestPayload) (models.CraftReviewResultPayload, error) {
 	m.called = true
 	m.request = request
-	return models.CraftReviewResultPayload{UniverseID: request.UniverseID, WorkID: request.WorkID, ChapterID: request.ChapterID}, nil
+	return models.CraftReviewResultPayload{UniverseID: request.UniverseID, WorkID: request.WorkID, ChapterID: request.ChapterID, RequestID: request.RequestID}, nil
+}
+
+type deadlineCraftReviewer struct {
+	started chan struct{}
+	ended   chan struct{}
+}
+
+func (m *deadlineCraftReviewer) Review(ctx context.Context, _ uuid.UUID, request models.CraftReviewRequestPayload) (models.CraftReviewResultPayload, error) {
+	close(m.started)
+	<-ctx.Done()
+	close(m.ended)
+	return models.CraftReviewResultPayload{UniverseID: request.UniverseID, WorkID: request.WorkID, ChapterID: request.ChapterID, RequestID: request.RequestID}, ctx.Err()
 }
 
 func (m mockUniverseOwnerResolver) FindByID(_ context.Context, _ uuid.UUID) (*models.Universe, error) {

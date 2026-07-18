@@ -68,6 +68,7 @@ beforeEach(() => {
   useWSStore.setState({
     status: 'idle',
     lastError: null,
+    lastErrorRequestId: null,
     reconnectAttempt: 0,
     activeUniverseId: null,
     analysisResults: [],
@@ -439,6 +440,30 @@ describe('wsStore', () => {
       const ws = MockWebSocket.instances[0]
       ws.simulateMessage({ type: 'error', payload: { message: 'auth failed' } })
       expect(getStore().lastError).toBe('auth failed')
+      expect(getStore().lastErrorRequestId).toBeNull()
+    })
+
+    it('retains the request ID attached to a craft review error and clears both fields', () => {
+      const ws = MockWebSocket.instances[0]
+      ws.simulateMessage({ type: 'error', payload: { message: 'craft review failed', request_id: 'review-1' } })
+
+      expect(getStore().lastError).toBe('craft review failed')
+      expect(getStore().lastErrorRequestId).toBe('review-1')
+
+      getStore().clearError()
+      expect(getStore().lastError).toBeNull()
+      expect(getStore().lastErrorRequestId).toBeNull()
+    })
+
+    it('drops an uncorrelated craft review result', () => {
+      getStore().setUniverseScope('uni-a')
+      const ws = MockWebSocket.instances[0]
+      ws.simulateMessage({
+        type: 'craft_review_result',
+        payload: { universe_id: 'uni-a', work_id: 'work-a', chapter_id: 'chapter-a', selections: [], notes: [] },
+      })
+
+      expect(getStore().craftReviews).toEqual([])
     })
   })
 

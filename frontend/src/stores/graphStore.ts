@@ -119,16 +119,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (!_universeId || !focalNodeId) return
 
     const requestVersion = get().requestVersion + 1
-    set({ requestVersion })
+    set({ requestVersion, loading: true, error: null })
     try {
       const response = await api.getEntityNeighbors(focalNodeId, _universeId, 2)
       if (!isCurrentRequest(get, requestVersion, _universeId, focalNodeId)) return
 
       const { nodes, edges, truncated, limits } = neighborhoodState(response)
-      set({ nodes, edges, truncated, limits, error: null })
+      set({ nodes, edges, truncated, limits, error: null, loading: false })
     } catch (error) {
       if (isCurrentRequest(get, requestVersion, _universeId, focalNodeId)) {
-        set({ error: (error as Error).message })
+        set({ error: (error as Error).message, loading: false })
       }
     }
   },

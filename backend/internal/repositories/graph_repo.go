@@ -338,9 +338,20 @@ func (r *GraphRepo) CreateEdgeTx(ctx context.Context, tx pgx.Tx, graphName, sour
 }
 
 func (r *GraphRepo) UpdateNodeRelevance(ctx context.Context, graphName, entityID string, score float64) error {
+	return r.UpdateNodeState(ctx, graphName, entityID, score, "")
+}
+
+// UpdateNodeState keeps AGE's denormalized presentation node in step with the
+// SQL entity record. Empty status preserves the existing node status for
+// compatibility with callers that only update relevance.
+func (r *GraphRepo) UpdateNodeState(ctx context.Context, graphName, entityID string, score float64, status string) error {
 	return r.withAgeConn(ctx, func(c *pgx.Conn) error {
-		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (n {entity_id: '%s'}) SET n.relevance_score = %v RETURN n $$) AS (n agtype)`,
-			quoteGraph(graphName), escapeCypherString(entityID), score)
+		setClause := fmt.Sprintf("n.relevance_score = %v", score)
+		if status != "" {
+			setClause += fmt.Sprintf(", n.status = '%s'", escapeCypherString(status))
+		}
+		query := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (n {entity_id: '%s'}) SET %s RETURN n $$) AS (n agtype)`,
+			quoteGraph(graphName), escapeCypherString(entityID), setClause)
 		_, err := c.Exec(ctx, query)
 		return err
 	})

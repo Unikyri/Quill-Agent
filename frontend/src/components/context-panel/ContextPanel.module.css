@@ -1,6 +1,7 @@
 /* ── ContextPanel ─────────────────────────────────────────────────── */
 .panel {
-  width: 280px;
+  width: 100%;
+  min-height: 0;
   flex-shrink: 0;
   background: var(--bg-card);
   border-left: 1px solid var(--line);
@@ -60,9 +61,27 @@
 }
 
 .sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 8px 10px;
   background: var(--surface-sunken);
+  cursor: pointer;
+  list-style: none;
+}
+
+.sectionHeader::-webkit-details-marker {
+  display: none;
+}
+
+.section[open] .sectionHeader {
   border-bottom: 1px solid var(--line);
+}
+
+.sectionHeader:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
 }
 
 .sectionKicker {
@@ -72,6 +91,17 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted-2);
+}
+
+.sectionChevron {
+  color: var(--muted-2);
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.section:not([open]) .sectionChevron {
+  transform: rotate(-90deg);
 }
 
 .sectionBody {

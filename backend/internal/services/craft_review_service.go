@@ -72,10 +72,14 @@ func NewCraftReviewService(
 func (s *CraftReviewService) Review(ctx context.Context, userID uuid.UUID, req models.CraftReviewRequestPayload) (models.CraftReviewResultPayload, error) {
 	result := models.CraftReviewResultPayload{
 		UniverseID: req.UniverseID, WorkID: req.WorkID, ChapterID: req.ChapterID,
+		RequestID: req.RequestID,
 		Selections: []models.CraftReviewSelection{}, Notes: []models.CraftReviewNote{},
 	}
-	if req.UniverseID == uuid.Nil || req.WorkID == uuid.Nil || req.ChapterID == uuid.Nil || strings.TrimSpace(req.Passage) == "" {
-		return result, errors.New("universe, work, chapter, and passage are required")
+	if req.UniverseID == uuid.Nil || req.WorkID == uuid.Nil || req.ChapterID == uuid.Nil || strings.TrimSpace(req.Passage) == "" || strings.TrimSpace(req.RequestID) == "" {
+		return result, errors.New("request ID, universe, work, chapter, and passage are required")
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 	if s.registry == nil || s.activations == nil || s.universes == nil {
 		return result, errors.New("craft review is not configured")
@@ -86,6 +90,9 @@ func (s *CraftReviewService) Review(ctx context.Context, userID uuid.UUID, req m
 	}
 	if universe == nil || universe.UserID != userID {
 		return result, ErrUniverseAccessDenied
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 
 	activeRows, err := s.activations.ListActive(ctx, req.UniverseID)
@@ -104,16 +111,28 @@ func (s *CraftReviewService) Review(ctx context.Context, userID uuid.UUID, req m
 		return result, nil
 	}
 
-	selection, err := s.selectSkills(ctx, req, universe, active)
-	if err != nil {
-		return result, err
+	selected := []string(nil)
+	rationale := "Quill selected these from the active craft checks for this passage."
+	if len(req.RequestedSkills) > 0 {
+		selected = limitSelected(req.RequestedSkills, active)
+		if len(selected) != len(uniqueSkillNames(req.RequestedSkills)) {
+			return result, errors.New("requested craft skills must be active for this universe and include at most three skills")
+		}
+		rationale = "Chosen by the writer for this passage."
+	} else {
+		selection, selectionErr := s.selectSkills(ctx, req, universe, active)
+		if selectionErr != nil {
+			return result, selectionErr
+		}
+		selected = limitSelected(selection.Selected, active)
+		if selection.Rationale != "" {
+			rationale = selection.Rationale
+		}
 	}
-	selected := limitSelected(selection.Selected, active)
 	if len(selected) == 0 {
 		return result, nil
 	}
 	for _, name := range selected {
-		rationale := selection.Rationale
 		result.Selections = append(result.Selections, models.CraftReviewSelection{Skill: name, Rationale: rationale})
 		log.Printf("[craft-review] selected skill=%s rationale=%q universe=%s", name, rationale, req.UniverseID)
 	}
@@ -123,13 +142,36 @@ func (s *CraftReviewService) Review(ctx context.Context, userID uuid.UUID, req m
 		return result, err
 	}
 	recalled := s.recallContext(ctx, req)
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	preferences := s.preferenceContext(ctx, req.UniverseID)
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	notes, err := s.reviewSelected(ctx, req, universe, selected, fullContext, recalled, preferences)
 	if err != nil {
 		return result, err
 	}
 	result.Notes = s.filterNotes(ctx, userID, req.UniverseID, req.Passage, selected, notes)
 	return result, nil
+}
+
+func uniqueSkillNames(names []string) []string {
+	unique := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		unique = append(unique, name)
+	}
+	return unique
 }
 
 func (s *CraftReviewService) selectSkills(ctx context.Context, req models.CraftReviewRequestPayload, universe *models.Universe, active []string) (craftSelectionResponse, error) {

@@ -163,6 +163,7 @@ export interface CraftReviewResult {
   universe_id: string
   work_id: string
   chapter_id: string
+  request_id: string
   selections: CraftReviewSelection[]
   notes: CraftReviewNote[]
 }

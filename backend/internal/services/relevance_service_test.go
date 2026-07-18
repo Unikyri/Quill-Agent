@@ -41,10 +41,11 @@ func TestDecayMath(t *testing.T) {
 	}
 }
 
-// TestRelevanceServiceTouch verifies that Touch updates last_mentioned on the entity.
+// TestRelevanceServiceTouch verifies that a real mention updates the entity
+// metadata, relevance, and the chartable relevance history together.
 func TestRelevanceServiceTouch(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "005")
+	testutil.RunMigrationsUpTo(t, pool, "019")
 	ctx := context.Background()
 
 	user := svcCreateTestUser(t, ctx, pool)
@@ -68,6 +69,68 @@ func TestRelevanceServiceTouch(t *testing.T) {
 	}
 	if found.LastMentionedAt == nil {
 		t.Error("LastMentionedAt should be set after touch")
+	}
+	if math.Abs(found.RelevanceScore-0.65) > 0.0001 {
+		t.Errorf("RelevanceScore = %f, want 0.65 after one mention", found.RelevanceScore)
+	}
+	points, err := repositories.NewEntityRelevanceHistoryRepo(pool).ListRecentByUniverse(ctx, universe.ID, 10)
+	if err != nil {
+		t.Fatalf("ListRecentByUniverse: %v", err)
+	}
+	if len(points) != 1 || math.Abs(points[0].RelevanceScore-0.65) > 0.0001 {
+		t.Fatalf("mention history = %#v, want one 0.65 point", points)
+	}
+}
+
+// TestRelevanceServiceDecayForChapter protects the key invariant: a chapter
+// cannot lower the relevance of entities it just mentioned, while idle
+// entities still decay and archive normally.
+func TestRelevanceServiceDecayForChapterExcludesMentionedEntities(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "023")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	work := svcCreateTestWork(t, ctx, pool, universe.ID)
+	chapter := svcCreateTestChapter(t, ctx, pool, work.ID, "Current chapter", 1)
+	mentioned := svcCreateTestEntity(t, ctx, pool, universe.ID, "Present", 0.65, "active")
+	idle := svcCreateTestEntity(t, ctx, pool, universe.ID, "Absent", 0.65, "active")
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin mention: %v", err)
+	}
+	if err := repositories.NewEntityRepo(pool).CreateMention(ctx, tx, &models.EntityMention{
+		ID: uuid.New(), EntityID: mentioned.ID, ChapterID: chapter.ID,
+		ParagraphIndex: 0, CharacterOffset: 0, ParagraphNodeID: "chapter:current:paragraph:0",
+		ContextSnippet: "Present appears.", MentionType: "character",
+	}); err != nil {
+		t.Fatalf("create mention: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit mention: %v", err)
+	}
+
+	repo := repositories.NewEntityRepo(pool)
+	svc := NewRelevanceService(pool, repo, 0.1, 0.15, nil)
+	if err := svc.DecayForChapter(ctx, universe.ID, chapter.ID); err != nil {
+		t.Fatalf("DecayForChapter: %v", err)
+	}
+
+	present, err := repo.FindByID(ctx, mentioned.ID)
+	if err != nil {
+		t.Fatalf("FindByID mentioned: %v", err)
+	}
+	if math.Abs(present.RelevanceScore-0.65) > 0.0001 {
+		t.Errorf("mentioned relevance = %f, want unchanged 0.65", present.RelevanceScore)
+	}
+	absent, err := repo.FindByID(ctx, idle.ID)
+	if err != nil {
+		t.Fatalf("FindByID idle: %v", err)
+	}
+	if math.Abs(absent.RelevanceScore-(0.65*math.Exp(-0.1))) > 0.0001 {
+		t.Errorf("idle relevance = %f, want one decay tick", absent.RelevanceScore)
 	}
 }
 

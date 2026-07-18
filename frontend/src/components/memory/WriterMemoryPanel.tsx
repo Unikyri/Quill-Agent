@@ -5,6 +5,42 @@ import styles from './WriterMemoryPanel.module.css'
 
 interface Props { universeId: string }
 
+const OBSERVATION_META: Record<string, { label: string; definition: string; format: (value: number) => string; sample: (size: number) => string }> = {
+  mean_sentence_length: {
+    label: 'Average sentence length',
+    definition: 'Average words in each detected sentence. This is a count, not a quality score.',
+    format: (value) => `${value.toFixed(1)} words`,
+    sample: (size) => `${size.toLocaleString()} sentences measured`,
+  },
+  adverb_density: {
+    label: 'Adverb density',
+    definition: 'Share of measured words that match Quill’s deterministic adverb list.',
+    format: (value) => `${value.toFixed(2)}%`,
+    sample: (size) => `${size.toLocaleString()} words measured`,
+  },
+  dialogue_ratio: {
+    label: 'Dialogue ratio',
+    definition: 'Share of measured words found inside quoted dialogue.',
+    format: (value) => `${value.toFixed(1)}%`,
+    sample: (size) => `${size.toLocaleString()} words measured`,
+  },
+  lexical_richness: {
+    label: 'Vocabulary variety',
+    definition: 'Unique words divided by all measured words. 1.00 means every measured word was unique.',
+    format: (value) => value.toFixed(2),
+    sample: (size) => `${size.toLocaleString()} words measured`,
+  },
+}
+
+function observationMeta(metric: string) {
+  return OBSERVATION_META[metric] || {
+    label: metric.replace(/_/g, ' '),
+    definition: 'A measured writing statistic from the current corpus.',
+    format: (value: number) => value.toFixed(2),
+    sample: (size: number) => `${size.toLocaleString()} items measured`,
+  }
+}
+
 export default function WriterMemoryPanel({ universeId }: Props) {
   const [preferences, setPreferences] = useState<WriterPreferenceDTO[]>([])
   const [observations, setObservations] = useState<WriterObservationDTO[]>([])
@@ -73,12 +109,12 @@ export default function WriterMemoryPanel({ universeId }: Props) {
       <div className={styles.heading}>
         <div>
           <p className={styles.eyebrow}>Act IV · Writer Memory</p>
-          <h2 id="writer-memory-title" className={styles.title}>What Quill believes about you</h2>
+          <h2 id="writer-memory-title" className={styles.title}>Measured writing baseline</h2>
         </div>
         <span className={styles.eyebrow}>{preferences.length} active</span>
       </div>
       <p className={styles.intro}>
-        Quill starts with observations about your prose, then promotes a preference only after your explicit accept, reject, or bounded revision behaviour. Silence is never treated as a rejection.
+        These are measurements from the saved or imported text in this universe. They describe the current corpus; they do not judge quality or infer an intention.
       </p>
       {loading && <p className={styles.state} role="status" aria-live="polite">Reading your evidence trail…</p>}
       {error && (
@@ -98,11 +134,17 @@ export default function WriterMemoryPanel({ universeId }: Props) {
           ) : (
             <div className={styles.observationList}>
               {scopedObservations.map((observation) => (
-                <div className={styles.observation} key={observation.id}>
-                  <span>{observation.metric.replace(/_/g, ' ')}</span>
-                  <strong>{observation.value.toFixed(2)}</strong>
-                  <small>sample {observation.sample_size}</small>
-                </div>
+                (() => {
+                  const meta = observationMeta(observation.metric)
+                  return (
+                    <div className={styles.observation} key={observation.id} title={meta.definition}>
+                      <span>{meta.label}</span>
+                      <strong>{meta.format(observation.value)}</strong>
+                      <small>{meta.sample(observation.sample_size)}</small>
+                      <p>{meta.definition}</p>
+                    </div>
+                  )
+                })()
               ))}
             </div>
           )}

@@ -330,6 +330,41 @@ func (r *EntityRepo) ListByUniverse(ctx context.Context, universeID uuid.UUID, f
 	return entities, total, nil
 }
 
+// ListGraphInventory returns every entity known to the relational source of
+// truth. AGE node writes are deliberately best-effort during ingestion, so
+// graph views use this inventory to retain isolated entities without
+// inventing a relationship for them.
+func (r *EntityRepo) ListGraphInventory(ctx context.Context, universeID uuid.UUID) ([]models.Entity, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, universe_id, type, name, aliases, description, properties, status, confidence, relevance_score,
+		       last_mentioned_chapter_id, last_mentioned_at, created_at, updated_at
+		FROM entities
+		WHERE universe_id = $1
+		ORDER BY relevance_score DESC, name ASC, id ASC
+	`, universeID)
+	if err != nil {
+		return nil, fmt.Errorf("list graph inventory: %w", err)
+	}
+	defer rows.Close()
+
+	entities := make([]models.Entity, 0)
+	for rows.Next() {
+		var entity models.Entity
+		if err := rows.Scan(
+			&entity.ID, &entity.UniverseID, &entity.Type, &entity.Name, &entity.Aliases, &entity.Description,
+			&entity.Properties, &entity.Status, &entity.Confidence, &entity.RelevanceScore, &entity.LastMentionedChapterID,
+			&entity.LastMentionedAt, &entity.CreatedAt, &entity.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan graph inventory entity: %w", err)
+		}
+		entities = append(entities, entity)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate graph inventory: %w", err)
+	}
+	return entities, nil
+}
+
 // CountByType returns the number of entities stored for each type in a universe.
 // It intentionally includes archived entities: the browser's type chips describe
 // the universe's complete entity inventory, while status remains a list filter.
@@ -440,6 +475,65 @@ func (r *EntityRepo) CountMentions(ctx context.Context, entityID uuid.UUID) (int
 	return count, nil
 }
 
+// ListMentionedEntityIDs returns the distinct active-memory entities that
+// were mentioned in one completed chapter. It is deliberately based on the
+// persisted mention rows rather than transient LLM output so retries and
+// imported chapters follow the same relevance rule.
+func (r *EntityRepo) ListMentionedEntityIDs(ctx context.Context, chapterID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT entity_id
+		FROM entity_mentions
+		WHERE chapter_id = $1
+	`, chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("list chapter mentioned entities: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan chapter mentioned entity: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate chapter mentioned entities: %w", err)
+	}
+	return ids, nil
+}
+
+// ListRelevanceStates returns the canonical SQL state used to synchronize AGE
+// after a relevance mutation. SQL remains authoritative if a graph is absent
+// or an AGE operation fails.
+func (r *EntityRepo) ListRelevanceStates(ctx context.Context, universeID uuid.UUID) ([]models.Entity, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, universe_id, type, name, aliases, COALESCE(description, ''), properties,
+		       status, confidence, relevance_score, last_mentioned_chapter_id,
+		       last_mentioned_at, created_at, updated_at
+		FROM entities
+		WHERE universe_id = $1
+	`, universeID)
+	if err != nil {
+		return nil, fmt.Errorf("list relevance states: %w", err)
+	}
+	defer rows.Close()
+
+	entities := make([]models.Entity, 0)
+	for rows.Next() {
+		e, err := scanEntity(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan relevance state: %w", err)
+		}
+		entities = append(entities, *e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate relevance states: %w", err)
+	}
+	return entities, nil
+}
+
 func (r *EntityRepo) GetMaxMentionsInUniverse(ctx context.Context, universeID uuid.UUID) (int, error) {
 	query := `
 		SELECT COALESCE(MAX(mention_count), 0) FROM (
@@ -481,22 +575,65 @@ func (r *EntityRepo) FindNewlyArchivable(ctx context.Context, universeID uuid.UU
 }
 
 // DecayAll applies exponential decay to all active entities in the universe.
-// score = score * e^(-lambda). Archived entities are skipped.
+// It is retained for explicit maintenance sweeps. Chapter-aware callers must
+// prefer DecayExcept so entities mentioned in the completed chapter retain
+// the relevance earned from that chapter.
 func (r *EntityRepo) DecayAll(ctx context.Context, universeID uuid.UUID, lambda float64) error {
+	return r.DecayExcept(ctx, universeID, nil, lambda)
+}
+
+// DecayExcept applies one event-driven decay tick to active entities other
+// than the supplied entity IDs. A completed chapter passes its mentioned
+// entities here so the same chapter cannot both reinforce and decay them.
+func (r *EntityRepo) DecayExcept(ctx context.Context, universeID uuid.UUID, excludedIDs []uuid.UUID, lambda float64) error {
 	// ponytail: per-chapter decay, multiply by e^(-lambda) each chapter advance
 	query := `
 		UPDATE entities SET relevance_score = relevance_score * EXP($2), updated_at = NOW()
-		WHERE universe_id = $1 AND status = 'active'
+		WHERE universe_id = $1
+		  AND status = 'active'
+		  AND (cardinality($3::uuid[]) = 0 OR id <> ALL($3))
 	`
-	_, err := r.pool.Exec(ctx, query, universeID, -lambda)
+	_, err := r.pool.Exec(ctx, query, universeID, -lambda, excludedIDs)
 	if err != nil {
-		return fmt.Errorf("decay all: %w", err)
+		return fmt.Errorf("decay entities: %w", err)
 	}
 	return nil
 }
 
-// TouchBatch resets the idle counter for multiple entities by updating
-// last_mentioned_chapter_id and last_mentioned_at for each entity ID.
+// ReinforceMention records a real mention as a relevance mutation. New
+// entities start conservatively; every active mention earns a small bounded
+// bump, while an archived entity is restored to its reactivation baseline.
+// Candidate/dismissed/merged rows intentionally remain outside the active
+// memory graph and are not mutated by this method.
+func (r *EntityRepo) ReinforceMention(ctx context.Context, entityID, chapterID uuid.UUID, bump float64) (*models.Entity, error) {
+	query := `
+		UPDATE entities
+		SET relevance_score = CASE
+				WHEN status = 'archived' THEN 0.8
+				ELSE LEAST(1.0, relevance_score + $3)
+			END,
+			status = CASE WHEN status = 'archived' THEN 'active' ELSE status END,
+			last_mentioned_chapter_id = $2,
+			last_mentioned_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1 AND status IN ('active', 'archived')
+		RETURNING id, universe_id, type, name, aliases, COALESCE(description, ''), properties,
+		          status, confidence, relevance_score, last_mentioned_chapter_id,
+		          last_mentioned_at, created_at, updated_at
+	`
+	e, err := scanEntity(r.pool.QueryRow(ctx, query, entityID, chapterID, bump))
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reinforce entity mention: %w", err)
+	}
+	return e, nil
+}
+
+// TouchBatch remains for callers that only need to update mention metadata.
+// RelevanceService.Touch is the application boundary for a user-visible
+// mention and uses ReinforceMention instead.
 func (r *EntityRepo) TouchBatch(ctx context.Context, entityIDs []uuid.UUID, chapterID uuid.UUID) error {
 	if len(entityIDs) == 0 {
 		return nil

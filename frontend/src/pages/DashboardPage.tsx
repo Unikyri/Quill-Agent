@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { GenreTagPicker } from '../components/genres'
 import { useFeedback } from '../components/feedback'
@@ -65,6 +65,18 @@ export default function DashboardPage() {
   const [demoUniverseId, setDemoUniverseId] = useState<string | null>(null)
   const [lastDemoAction, setLastDemoAction] = useState<DemoAction>('clone')
   const [demoError, setDemoError] = useState<string | null>(null)
+  const [editingUniverse, setEditingUniverse] = useState<UniverseSummary | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editGenres, setEditGenres] = useState<string[]>([])
+  const [editError, setEditError] = useState<string | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingUniverse, setDeletingUniverse] = useState<UniverseSummary | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const dialogRef = useRef<HTMLElement | null>(null)
+  const editNameRef = useRef<HTMLInputElement | null>(null)
+  const deleteCancelRef = useRef<HTMLButtonElement | null>(null)
+  const dialogTriggerRef = useRef<HTMLElement | null>(null)
 
   const loadUniverses = useCallback(async (showLoader = true) => {
     if (showLoader) setIsLoading(true)
@@ -107,6 +119,101 @@ export default function DashboardPage() {
     setShowCreate(false)
     setCreateError(null)
     if (isForcingNew) navigate('/dashboard', { replace: true })
+  }
+
+  const restoreDialogTrigger = () => {
+    const trigger = dialogTriggerRef.current
+    dialogTriggerRef.current = null
+    requestAnimationFrame(() => trigger?.focus())
+  }
+
+  const closeEdit = () => {
+    setEditingUniverse(null)
+    setEditError(null)
+    restoreDialogTrigger()
+  }
+
+  const closeDelete = () => {
+    setDeletingUniverse(null)
+    setEditError(null)
+    restoreDialogTrigger()
+  }
+
+  const openEdit = (universe: UniverseSummary, trigger: HTMLElement) => {
+    dialogTriggerRef.current = trigger
+    setEditingUniverse(universe)
+    setEditName(universe.name)
+    setEditDescription(universe.description || '')
+    setEditGenres(tagsFor(universe))
+    setEditError(null)
+  }
+
+  const openDelete = (universe: UniverseSummary, trigger: HTMLElement) => {
+    dialogTriggerRef.current = trigger
+    setDeletingUniverse(universe)
+    setEditError(null)
+  }
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      if (savingEdit || deleting) return
+      if (editingUniverse) closeEdit()
+      if (deletingUniverse) closeDelete()
+      return
+    }
+
+    if (event.key !== 'Tab') return
+
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )
+    if (!focusable?.length) return
+
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
+  useEffect(() => {
+    if (editingUniverse) editNameRef.current?.focus()
+  }, [editingUniverse])
+
+  useEffect(() => {
+    if (deletingUniverse) deleteCancelRef.current?.focus()
+  }, [deletingUniverse])
+
+  const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingUniverse || !editName.trim()) return
+    setSavingEdit(true); setEditError(null)
+    try {
+      const { universe } = await api.updateUniverse(editingUniverse.id, { name: editName.trim(), description: editDescription.trim(), genre_tags: editGenres })
+      setUniverses((current) => current.map((item) => item.id === editingUniverse.id ? universe as UniverseSummary : item))
+      closeEdit()
+      publish({ scope: 'home', status: 'completed', message: 'Universe details saved.' })
+    } catch (error) {
+      setEditError(errorMessage(error, 'We could not save this universe. Try again.'))
+    } finally { setSavingEdit(false) }
+  }
+
+  const confirmDelete = async () => {
+    if (!deletingUniverse || deleting) return
+    setDeleting(true)
+    try {
+      await api.deleteUniverse(deletingUniverse.id)
+      setUniverses((current) => current.filter((item) => item.id !== deletingUniverse.id))
+      setDeletingUniverse(null)
+      dialogTriggerRef.current = null
+      publish({ scope: 'home', status: 'completed', message: 'Universe deleted.' })
+    } catch (error) {
+      setEditError(errorMessage(error, 'We could not delete this universe. Try again.'))
+    } finally { setDeleting(false) }
   }
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
@@ -363,6 +470,8 @@ export default function DashboardPage() {
                     <button type="button" className={styles.cardButton} onClick={() => navigate(writePath(universe.id))}>
                       Open writing
                     </button>
+                    <button type="button" className={styles.cardButton} aria-label={`Edit ${universe.name}`} onClick={(event) => openEdit(universe, event.currentTarget)}>Edit</button>
+                    <button type="button" className={styles.deleteButton} aria-label={`Delete ${universe.name}`} onClick={(event) => openDelete(universe, event.currentTarget)}>Delete</button>
                   </div>
                 </article>
               )
@@ -370,6 +479,32 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      {editingUniverse && (
+        <div className={styles.dialogBackdrop} role="presentation">
+          <section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="edit-universe-title" onKeyDown={handleDialogKeyDown}>
+            <div className={styles.panelHeading}><div><p className={styles.eyebrow}>Universe settings</p><h2 id="edit-universe-title">Edit {editingUniverse.name}</h2></div><button className={styles.textButton} type="button" aria-label="Close edit universe dialog" disabled={savingEdit} onClick={closeEdit}>Close</button></div>
+            <form className={styles.createForm} onSubmit={saveEdit}>
+              <label className={styles.field} htmlFor="edit-universe-name"> <span>Name</span><input ref={editNameRef} id="edit-universe-name" value={editName} onChange={(event) => setEditName(event.target.value)} required disabled={savingEdit} /></label>
+              <label className={styles.field}> <span>Story brief <em>Optional</em></span><textarea rows={3} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} disabled={savingEdit} /></label>
+              <GenreTagPicker id="edit-universe-genres" label="Genres" value={editGenres} onChange={setEditGenres} disabled={savingEdit} />
+              {editError && <p className={styles.formError} role="alert">{editError}</p>}
+              <div className={styles.formActions}><button type="submit" className={styles.primaryButton} disabled={savingEdit || !editName.trim()}>{savingEdit ? 'Saving…' : 'Save changes'}</button><button type="button" className={styles.secondaryButton} disabled={savingEdit} onClick={closeEdit}>Cancel</button></div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {deletingUniverse && (
+        <div className={styles.dialogBackdrop} role="presentation">
+          <section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="delete-universe-title" aria-describedby="delete-universe-description" onKeyDown={handleDialogKeyDown}>
+            <p className={styles.eyebrow}>Permanent action</p><h2 id="delete-universe-title">Delete {deletingUniverse.name}?</h2>
+            <p id="delete-universe-description">This removes its works, chapters, and stored story memory. This cannot be undone.</p>
+            {editError && <p className={styles.formError} role="alert">{editError}</p>}
+            <div className={styles.formActions}><button type="button" className={styles.deleteButton} disabled={deleting} onClick={() => void confirmDelete()}>{deleting ? 'Deleting…' : 'Delete universe'}</button><button ref={deleteCancelRef} type="button" className={styles.secondaryButton} disabled={deleting} onClick={closeDelete}>Cancel</button></div>
+          </section>
+        </div>
+      )}
 
       <aside className={styles.demoCard} aria-labelledby="guided-demo-title">
         <div>

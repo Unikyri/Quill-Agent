@@ -7,7 +7,7 @@ import UniverseLayout from './pages/UniverseLayout'
 import EditorRedirect from './pages/EditorRedirect'
 import EntityRedirect from './pages/EntityRedirect'
 import WorkRedirect from './pages/WorkRedirect'
-import { explorePath, reviewPath, writeImportPath, writePath } from './lib/canonicalRoutes'
+import { explorePath, reviewPath, writeImportPath, writePath, type ReviewView } from './lib/canonicalRoutes'
 import { RouteLoadBoundary } from './components/shared/RouteLoadBoundary'
 
 // ponytail: lazy-loaded — keeps landing page out of main bundle
@@ -20,6 +20,7 @@ const TimelinePage = lazy(() => import('./pages/TimelinePage'))
 const KnowledgeGraphPage = lazy(() => import('./pages/KnowledgeGraphPage'))
 const MemoryInspectorPage = lazy(() => import('./pages/MemoryInspectorPage'))
 const ReviewPage = lazy(() => import('./pages/ReviewPage'))
+const SkillsPage = lazy(() => import('./pages/SkillsPage'))
 
 function MissingUniverseRedirect() {
   return <Navigate to="/dashboard" replace />
@@ -37,7 +38,7 @@ function ToExplore({ view }: { view: 'entities' | 'map' | 'timeline' }) {
   return <Navigate to={explorePath(universeId, view, entityId)} replace />
 }
 
-function ToReview({ view }: { view: 'issues' | 'candidates' | 'craft' }) {
+function ToReview({ view }: { view: ReviewView }) {
   const { universeId } = useParams<{ universeId: string }>()
   if (!universeId) return <MissingUniverseRedirect />
   return <Navigate to={reviewPath(universeId, view)} replace />
@@ -82,6 +83,7 @@ export function AppRoutes() {
           <Route path="explore/timeline" element={<RouteLoadBoundary label="Loading timeline…"><TimelinePage /></RouteLoadBoundary>} />
           <Route path="memory" element={<RouteLoadBoundary label="Loading memory…"><MemoryInspectorPage /></RouteLoadBoundary>} />
           <Route path="review/:view" element={<RouteLoadBoundary label="Loading review…"><ReviewPage /></RouteLoadBoundary>} />
+          <Route path="review/skills" element={<RouteLoadBoundary label="Loading editorial skills…"><SkillsPage /></RouteLoadBoundary>} />
 
           {/* Legacy universe-scoped deep links remain explicit redirects while their
               content is consolidated by the Write, Explore, and Review work. */}
@@ -96,7 +98,7 @@ export function AppRoutes() {
           <Route path="contradictions" element={<ToReview view="issues" />} />
           <Route path="plot-holes" element={<ToReview view="issues" />} />
           <Route path="ingest" element={<ToWrite importMode />} />
-          <Route path="skills" element={<ToReview view="craft" />} />
+          <Route path="skills" element={<ToReview view="skills" />} />
           <Route path="*" element={<ToWrite />} />
         </Route>
         {/* Legacy redirects */}

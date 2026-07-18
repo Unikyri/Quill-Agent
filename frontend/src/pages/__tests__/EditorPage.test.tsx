@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import EditorPage from '../EditorPage'
+import type { CraftReviewResult } from '../../lib/types'
 
 vi.mock('../EditorPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 vi.mock('../IngestPage', () => ({ IngestPanel: () => null }))
@@ -27,9 +28,14 @@ const mockCreateChapter = vi.fn()
 const mockStoreState = vi.hoisted(() => ({
   ws: {
     status: 'open',
-    lastError: null,
+    lastError: null as string | null,
+    lastErrorRequestId: null as string | null,
     send: vi.fn(),
-    craftReviews: [],
+    clearError: vi.fn(() => {
+      mockStoreState.ws.lastError = null
+      mockStoreState.ws.lastErrorRequestId = null
+    }),
+    craftReviews: [] as CraftReviewResult[],
     liveCandidates: [],
     removeLiveCandidate: vi.fn(),
   },
@@ -71,10 +77,11 @@ vi.mock('../../stores/editorStore', () => ({
 // behavior. Stub them so this suite verifies EditorPage's data loading and workspace
 // wiring without inheriting their asynchronous effects.
 vi.mock('../../components/editor/TipTapEditor', () => ({
-  default: ({ chapterId, workId, universeId, onContentChange }: { chapterId: string; workId: string; universeId: string; onContentChange: (html: string, text: string) => void }) => (
+  default: ({ chapterId, workId, universeId, onContentChange, onCraftReview }: { chapterId: string; workId: string; universeId: string; onContentChange: (html: string, text: string) => void; onCraftReview?: (selection: { passage: string; from: number; to: number }) => void }) => (
     <div data-testid="tiptap-editor">
       {`${chapterId}:${workId}:${universeId}`}
       <button type="button" onClick={() => onContentChange('<p>Updated chapter</p>', 'Updated chapter')}>Update chapter</button>
+      <button type="button" onClick={() => onCraftReview?.({ passage: 'Review this passage.', from: 1, to: 21 })}>Review selection</button>
     </div>
   ),
 }))
@@ -84,7 +91,9 @@ vi.mock('../../components/context-panel/ContextPanel', () => ({
 }))
 
 vi.mock('../../components/editor/CraftReviewPanel', () => ({
-  default: () => null,
+  default: ({ loading, review }: { loading?: boolean; review?: { request_id: string } | null }) => (
+    <span>{loading ? 'Craft reviewing' : review ? `Craft result ${review.request_id}` : 'Craft idle'}</span>
+  ),
 }))
 
 vi.mock('../../components/editor/EntityCandidateTray', () => ({
@@ -112,6 +121,9 @@ describe('EditorPage', () => {
     window.localStorage.clear()
     mockRouteParams.universeId = 'uni-1'
     mockRouteParams.chapterId = 'ch-1'
+	mockStoreState.ws.craftReviews = []
+	mockStoreState.ws.lastError = null
+	mockStoreState.ws.lastErrorRequestId = null
     mockListChapters.mockResolvedValue({ chapters: [] })
     mockGetWork.mockResolvedValue({ work: { id: 'work-1', title: 'Test Work', universe_id: 'uni-1' } })
   })
@@ -133,6 +145,89 @@ describe('EditorPage', () => {
     })
     expect(screen.getByTestId('context-panel')).toHaveTextContent('open')
     expect(screen.getByText('42 words')).toBeInTheDocument()
+  })
+
+  it('keeps a craft review pending through stale or unrelated WS errors, then handles only its tagged error', async () => {
+    mockGetChapter.mockResolvedValue({
+      chapter: { id: 'ch-1', content: '', raw_text: '', work_id: 'work-1', universe_id: 'uni-1' },
+    })
+    mockStoreState.ws.lastError = 'A previous analysis failed'
+    mockStoreState.ws.lastErrorRequestId = 'previous-request'
+    const user = userEvent.setup()
+    const view = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('tiptap-editor')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Review selection' }))
+    await waitFor(() => expect(mockStoreState.ws.send).toHaveBeenCalledTimes(1))
+    expect(mockStoreState.ws.clearError).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Craft reviewing')).toBeInTheDocument()
+
+    const requestId = mockStoreState.ws.send.mock.calls[0][0].payload.request_id as string
+    mockStoreState.ws.lastError = 'A different request failed'
+    mockStoreState.ws.lastErrorRequestId = 'different-request'
+    view.rerender(pageTree())
+    expect(screen.getByText('Craft reviewing')).toBeInTheDocument()
+
+    mockStoreState.ws.lastError = 'Craft review failed'
+    mockStoreState.ws.lastErrorRequestId = requestId
+    view.rerender(pageTree())
+    expect(await screen.findByText('Craft review could not finish: Craft review failed')).toBeInTheDocument()
+    expect(screen.getByText('Craft idle')).toBeInTheDocument()
+  })
+
+  it('ignores a different craft result until the active request resolves', async () => {
+    mockGetChapter.mockResolvedValue({
+      chapter: { id: 'ch-1', content: '', raw_text: '', work_id: 'work-1', universe_id: 'uni-1' },
+    })
+    const user = userEvent.setup()
+    const view = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('tiptap-editor')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Review selection' }))
+    await waitFor(() => expect(mockStoreState.ws.send).toHaveBeenCalledTimes(1))
+    const requestId = mockStoreState.ws.send.mock.calls[0][0].payload.request_id as string
+
+    mockStoreState.ws.craftReviews = [{ universe_id: 'uni-1', work_id: 'work-1', chapter_id: 'ch-1', request_id: 'different-request', selections: [], notes: [] }]
+    view.rerender(pageTree())
+    expect(screen.getByText('Craft reviewing')).toBeInTheDocument()
+
+    mockStoreState.ws.craftReviews = [
+      { universe_id: 'uni-1', work_id: 'work-1', chapter_id: 'ch-1', request_id: requestId, selections: [], notes: [] },
+      { universe_id: 'uni-1', work_id: 'work-1', chapter_id: 'ch-1', request_id: 'unrelated-after-active', selections: [], notes: [] },
+    ]
+    view.rerender(pageTree())
+    await waitFor(() => expect(screen.getByText(`Craft result ${requestId}`)).toBeInTheDocument())
+  })
+
+  it('rejects a timed-out result and only renders the later request it belongs to', async () => {
+    mockGetChapter.mockResolvedValue({
+      chapter: { id: 'ch-1', content: '', raw_text: '', work_id: 'work-1', universe_id: 'uni-1' },
+    })
+    const user = userEvent.setup()
+    const view = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('tiptap-editor')).toBeInTheDocument())
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByRole('button', { name: 'Review selection' }))
+    const firstRequest = mockStoreState.ws.send.mock.calls[0][0].payload.request_id as string
+    act(() => { vi.advanceTimersByTime(45_000) })
+    expect(screen.getByText('Craft idle')).toBeInTheDocument()
+    expect(screen.getByText(/Craft review took too long/)).toBeInTheDocument()
+    vi.useRealTimers()
+
+    await user.click(screen.getByRole('button', { name: 'Review selection' }))
+    const secondRequest = mockStoreState.ws.send.mock.calls[1][0].payload.request_id as string
+    mockStoreState.ws.craftReviews = [{ universe_id: 'uni-1', work_id: 'work-1', chapter_id: 'ch-1', request_id: firstRequest, selections: [], notes: [] }]
+    view.rerender(pageTree())
+    expect(screen.getByText('Craft reviewing')).toBeInTheDocument()
+    expect(screen.queryByText(`Craft result ${firstRequest}`)).not.toBeInTheDocument()
+
+    mockStoreState.ws.craftReviews = [
+      { universe_id: 'uni-1', work_id: 'work-1', chapter_id: 'ch-1', request_id: firstRequest, selections: [], notes: [] },
+      { universe_id: 'uni-1', work_id: 'work-1', chapter_id: 'ch-1', request_id: secondRequest, selections: [], notes: [] },
+    ]
+    view.rerender(pageTree())
+    await waitFor(() => expect(screen.getByText(`Craft result ${secondRequest}`)).toBeInTheDocument())
   })
 
   it('collapses the chapter panel and saves the workspace preference', async () => {

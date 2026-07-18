@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useWSStore, type WSStatus } from '../../stores/wsStore'
 import { ENTITY_TYPE_META } from '../../lib/entityTypes'
 import { api } from '../../lib/api'
@@ -7,6 +7,24 @@ import styles from './ContextPanel.module.css'
 interface ContextPanelProps {
   status: WSStatus
   universeId?: string
+}
+
+interface AnalysisSectionProps {
+  title: string
+  children: ReactNode
+  defaultOpen?: boolean
+}
+
+function AnalysisSection({ title, children, defaultOpen = true }: AnalysisSectionProps) {
+  return (
+    <details className={styles.section} open={defaultOpen}>
+      <summary className={styles.sectionHeader}>
+        <span className={styles.sectionKicker}>{title}</span>
+        <span className={styles.sectionChevron} aria-hidden="true">⌄</span>
+      </summary>
+      <div className={styles.sectionBody}>{children}</div>
+    </details>
+  )
 }
 
 const PIPELINE_STAGES = [
@@ -160,11 +178,7 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
         ))}
 
         {/* ── Live Pipeline stepper ─────────────────────────────────── */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionKicker}>Live Pipeline</span>
-          </div>
-          <div className={styles.sectionBody}>
+        <AnalysisSection title="Live Pipeline">
             <div className={styles.stepper}>
               {PIPELINE_STAGES.map((s, i) => {
                 const state = currentStageIdx === -1 ? 'pending' : i < currentStageIdx ? 'done' : i === currentStageIdx ? 'active' : 'pending'
@@ -178,15 +192,10 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
                 )
               })}
             </div>
-          </div>
-        </div>
+        </AnalysisSection>
 
         {/* ── Context Budget ────────────────────────────────────────── */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionKicker}>Context Budget</span>
-          </div>
-          <div className={styles.sectionBody}>
+        <AnalysisSection title="Context Budget">
             {!budget ? (
               <p className={styles.emptyPlaceholder}>Budget appears once analysis runs</p>
             ) : (
@@ -205,15 +214,10 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
                 </div>
               </>
             )}
-          </div>
-        </div>
+        </AnalysisSection>
 
         {/* ── Entities in this paragraph ─ always rendered ─────────── */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionKicker}>Entities in this paragraph</span>
-          </div>
-          <div className={styles.sectionBody}>
+        <AnalysisSection title="Entities in this paragraph">
             {discoveredEntities.length === 0 ? (
               <div className={styles.entityChips}>
                 {/* Skeleton chips when idle/loading */}
@@ -242,15 +246,10 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
                 })}
               </div>
             )}
-          </div>
-        </div>
+        </AnalysisSection>
 
         {/* ── Contradiction detected ─ always rendered ─────────────── */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionKicker}>⚠ Contradiction detected</span>
-          </div>
-          <div className={styles.sectionBody}>
+        <AnalysisSection title="⚠ Contradiction detected">
             {contradictions.length === 0 ? (
               <>
                 <div className={`skeleton ${styles.skRow}`} style={{ width: '90%', height: 40, marginBottom: 8 }} />
@@ -284,15 +283,10 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
                 </div>
               ))
             )}
-          </div>
-        </div>
+        </AnalysisSection>
 
         {/* ── Relevant memory ─ always rendered, with retrieval-source badges ── */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionKicker}>Relevant memory</span>
-          </div>
-          <div className={styles.sectionBody}>
+        <AnalysisSection title="Relevant memory" defaultOpen={false}>
             {recallItems.length === 0 ? (
               <>
                 <div className={`skeleton ${styles.skRow}`} style={{ height: 48, marginBottom: 6 }} />
@@ -322,15 +316,10 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
                 </div>
               ))
             )}
-          </div>
-        </div>
+        </AnalysisSection>
 
         {/* ── Entity Lifecycle ──────────────────────────────────────── */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span className={styles.sectionKicker}>Entity Lifecycle</span>
-          </div>
-          <div className={styles.sectionBody}>
+        <AnalysisSection title="Entity Lifecycle" defaultOpen={false}>
             {memoryStatusError && (
               <div className={styles.memoryStatusError} role={hasCurrentMemoryStatus ? 'status' : 'alert'}>
                 <span>{memoryStatusError}</span>
@@ -355,8 +344,7 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
                 )
               })
             )}
-          </div>
-        </div>
+        </AnalysisSection>
 
       </div>
     </div>

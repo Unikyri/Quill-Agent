@@ -102,7 +102,7 @@ export default function KnowledgeGraphPage() {
   const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) : undefined
   const selectedEdge = selectedEdgeId ? edges.find((edge) => edge.id === selectedEdgeId) : undefined
 
-  if (loading || error) {
+  if ((loading || error) && nodes.length === 0) {
     return (
       <PageStatus
         loading={loading}
@@ -119,18 +119,30 @@ export default function KnowledgeGraphPage() {
           <div>
             <p className={styles.kicker}>Explore</p>
             <h1 id="relationship-map-heading">Relationship map</h1>
-            <p>Focused on one entity and its two-hop story neighborhood.</p>
+            <p>Start with relationships, then focus any entity to inspect its two-hop story neighborhood.</p>
           </div>
-          <button
-            className={styles.resetButton}
-            type="button"
-            onClick={() => void resetFocus()}
-            disabled={!focalNodeId}
-          >
-            <RotateCcw size={15} aria-hidden="true" />
-            Reset focus
-          </button>
+          <div className={styles.mapActions}>
+            <button className={styles.resetButton} type="button" onClick={() => void refresh()} disabled={loading}>
+              <RotateCcw size={15} aria-hidden="true" />
+              {loading ? 'Updating…' : 'Refresh map'}
+            </button>
+            <button
+              className={styles.resetButton}
+              type="button"
+              onClick={() => void resetFocus()}
+              disabled={!focalNodeId || loading}
+            >
+              Reset focus
+            </button>
+          </div>
         </header>
+
+        {(loading || error) && (
+          <div className={error ? styles.mapFailure : styles.mapStatus} role={error ? 'alert' : 'status'} aria-live="polite">
+            <span>{error || 'Updating the relationship map. Your entity-type filters remain applied.'}</span>
+            {error && <button type="button" onClick={() => void refresh()}>Try again</button>}
+          </div>
+        )}
 
         {truncated && (
           <div className={styles.truncationNotice} role="status">
@@ -254,7 +266,7 @@ export default function KnowledgeGraphPage() {
           <section className={styles.focusedInspector}>
             <p className={styles.kicker}>Map summary</p>
             <h2>{visibleNodes.length} entities · {visibleEdges.length} relationships</h2>
-            <p>Select a relationship from the list for its exact source, type, and target.</p>
+            <p>Relationships come first so you can inspect the connections before choosing an entity.</p>
           </section>
         )}
 
@@ -267,22 +279,6 @@ export default function KnowledgeGraphPage() {
             </div>
           </div>
           <p className={styles.summaryCopy}>This list mirrors the visible map and can be used without the canvas.</p>
-
-          <h3>Entities</h3>
-          <ul className={styles.entityList}>
-            {visibleNodes.map((node) => (
-              <li key={node.id}>
-                <button
-                  type="button"
-                  aria-pressed={selectedNodeId === node.id}
-                  onClick={() => void focusNode(node.id)}
-                >
-                  <span>{node.data.label}</span>
-                  <small>{node.type.replace(/_/g, ' ')}</small>
-                </button>
-              </li>
-            ))}
-          </ul>
 
           <h3>Relationships</h3>
           {visibleEdges.length > 0 ? (
@@ -302,6 +298,22 @@ export default function KnowledgeGraphPage() {
           ) : (
             <p className={styles.unavailable}>No relationships are available for the visible entities.</p>
           )}
+
+          <h3>Entities</h3>
+          <ul className={styles.entityList}>
+            {visibleNodes.map((node) => (
+              <li key={node.id}>
+                <button
+                  type="button"
+                  aria-pressed={selectedNodeId === node.id}
+                  onClick={() => void focusNode(node.id)}
+                >
+                  <span>{node.data.label}</span>
+                  <small>{node.type.replace(/_/g, ' ')}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
         </section>
 
         {focalNodeId && <p className={styles.focalNote}>Showing the focal entity and its {limits?.hops || 2}-hop neighborhood in {universe?.name || 'this universe'}.</p>}

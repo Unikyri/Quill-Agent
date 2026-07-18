@@ -19,7 +19,7 @@ import (
 
 // TestResolveOrCreateNewEntityAppendsHistoryRow proves entity creation (Step
 // 4 of ResolveOrCreate, brand-new entity, isNew=true) writes a single
-// entity_relevance_history row with the initial score (0.8) and status
+// entity_relevance_history row with the conservative initial score (0.5) and status
 // (spec: Relevance history persistence requirement).
 func TestResolveOrCreateNewEntityAppendsHistoryRow(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
@@ -72,8 +72,8 @@ func TestResolveOrCreateNewEntityAppendsHistoryRow(t *testing.T) {
 	if points[0].EntityID != entity.ID {
 		t.Errorf("EntityID = %v, want %v", points[0].EntityID, entity.ID)
 	}
-	if points[0].RelevanceScore != 0.8 {
-		t.Errorf("RelevanceScore = %f, want 0.8", points[0].RelevanceScore)
+	if points[0].RelevanceScore != initialEntityRelevance {
+		t.Errorf("RelevanceScore = %f, want %f", points[0].RelevanceScore, initialEntityRelevance)
 	}
 }
 

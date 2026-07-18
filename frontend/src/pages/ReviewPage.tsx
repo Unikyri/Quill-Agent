@@ -61,7 +61,8 @@ interface ActiveAction {
   universeId: string
 }
 
-const REVIEW_VIEWS: ReviewView[] = ['issues', 'candidates', 'craft']
+const REVIEW_VIEWS = ['issues', 'candidates', 'craft'] as const
+type ReviewTabView = typeof REVIEW_VIEWS[number]
 const SEVERITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 }
 
 function messageFor(error: unknown, fallback: string): string {
@@ -143,7 +144,7 @@ export default function ReviewPage() {
     universeGeneration.current += 1
   }
 
-  const view = REVIEW_VIEWS.includes(rawView as ReviewView) ? rawView as ReviewView : null
+  const view = REVIEW_VIEWS.includes(rawView as ReviewTabView) ? rawView as ReviewTabView : null
 
   const loadIssues = useCallback(async () => {
     if (!universeId) return false
@@ -420,7 +421,7 @@ function IssuesInbox({ issues, loading, error, onRetry, onAct, pendingConfirmati
   if (loading) return <LoadingState label="Loading live review findings…" />
   if (error && issues.length === 0) return <ErrorState message={error} onRetry={onRetry} />
   if (issues.length === 0) {
-    return <EmptyState title="No issues need a decision" detail="Quill has not found a contradiction or open plot thread in the available analysis." />
+    return <EmptyState title="No issues need a decision" detail="No contradiction or open plot thread is available from the analysis completed so far. This is not a guarantee that the manuscript has no issues; analyze more passages or import more chapters to extend coverage." />
   }
 
   return (
@@ -505,7 +506,7 @@ function CandidatesInbox({ candidates, loading, error, onRetry, onAct, pendingCo
   if (loading) return <LoadingState label="Loading current entity candidates…" />
   if (error) return <ErrorState message={error} onRetry={onRetry} />
   if (candidates.length === 0) {
-    return <EmptyState title="No entity candidates waiting" detail="Candidates appear here only while the current analysis API reports them." />
+    return <EmptyState title="No entity candidates waiting" detail="Candidates are unconfirmed names or places extracted from analyzed passages. They appear here only while the current API reports them, and nothing becomes story lore until you accept it." />
   }
 
   return (
@@ -564,6 +565,7 @@ function CraftAvailability({ universeId }: { universeId: string }) {
       <p className={styles.eyebrow}>Contextual review</p>
       <h2 id="craft-availability-title">Craft notes stay with the passage</h2>
       <p>The current API returns craft feedback only for a selected passage in Write. It does not provide a persisted craft-notes inbox, so Quill cannot honestly list historical notes here.</p>
+      <Link className={styles.primaryLink} to={reviewPath(universeId, 'skills')}>Manage editorial skills</Link>
       <Link className={styles.primaryLink} to={writePath(universeId)}>Open Write and review a selection</Link>
     </section>
   )

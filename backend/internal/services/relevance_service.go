@@ -8,8 +8,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/quill/backend/internal/models"
 	"github.com/quill/backend/internal/repositories"
 )
+
+const mentionRelevanceBump = 0.15
 
 // RelevanceService manages entity relevance scoring with exponential decay.
 //
@@ -42,10 +45,33 @@ func NewRelevanceService(pool *pgxpool.Pool, entityRepo *repositories.EntityRepo
 	}
 }
 
-// Touch resets the idle counter for a mentioned entity, updating
-// last_mentioned_chapter_id and last_mentioned_at.
+// Touch records a real entity mention. It bumps active relevance, restores an
+// archived entity to active memory, snapshots the mutation for the timeline,
+// and synchronizes AGE's denormalized node best-effort.
 func (s *RelevanceService) Touch(ctx context.Context, entityID, chapterID uuid.UUID) error {
-	return s.entityRepo.TouchBatch(ctx, []uuid.UUID{entityID}, chapterID)
+	before, err := s.entityRepo.FindByID(ctx, entityID)
+	if err != nil {
+		return err
+	}
+	updated, err := s.entityRepo.ReinforceMention(ctx, entityID, chapterID, mentionRelevanceBump)
+	if err != nil {
+		return err
+	}
+	if updated == nil {
+		return nil
+	}
+	if s.historyRepo != nil {
+		if err := s.historyRepo.AppendOne(ctx, updated.ID); err != nil {
+			log.Printf("[relevance] append history for mentioned entity %s: %v", updated.ID, err)
+		}
+	}
+	s.syncGraphState(ctx, updated)
+	if before.Status == "archived" && s.consolidationSvc != nil {
+		if err := s.consolidationSvc.DeconsolidateEntity(ctx, updated.ID); err != nil {
+			log.Printf("[relevance] deconsolidate mentioned entity %s: %v", updated.ID, err)
+		}
+	}
+	return nil
 }
 
 // Reactivate sets the entity's score to 0.8 and status to "active".
@@ -81,6 +107,7 @@ func (s *RelevanceService) Reactivate(ctx context.Context, entityID uuid.UUID) e
 			log.Printf("[relevance] append history for reactivated entity %s: %v", entityID, err)
 		}
 	}
+	s.syncGraphState(ctx, e)
 
 	// spec: after reactivation, deconsolidate (nil-safe)
 	if s.consolidationSvc != nil {
@@ -100,7 +127,25 @@ func (s *RelevanceService) Reactivate(ctx context.Context, entityID uuid.UUID) e
 // ponytail: single-pass strategy — decay and archive in one call; no separate
 // archive sweep needed.
 func (s *RelevanceService) DecayAll(ctx context.Context, universeID uuid.UUID) error {
-	if err := s.entityRepo.DecayAll(ctx, universeID, s.lambda); err != nil {
+	return s.DecayExcept(ctx, universeID, nil)
+}
+
+// DecayForChapter advances relevance after a completed chapter. The entities
+// mentioned in that chapter are explicitly excluded: a fresh mention must not
+// lose relevance in the exact event that records it.
+func (s *RelevanceService) DecayForChapter(ctx context.Context, universeID, chapterID uuid.UUID) error {
+	mentioned, err := s.entityRepo.ListMentionedEntityIDs(ctx, chapterID)
+	if err != nil {
+		return err
+	}
+	return s.DecayExcept(ctx, universeID, mentioned)
+}
+
+// DecayExcept is the chapter-aware decay primitive. DecayAll remains for an
+// explicit manual maintenance sweep; production chapter flows call this with
+// the mentions from the completed chapter.
+func (s *RelevanceService) DecayExcept(ctx context.Context, universeID uuid.UUID, mentionedIDs []uuid.UUID) error {
+	if err := s.entityRepo.DecayExcept(ctx, universeID, mentionedIDs, s.lambda); err != nil {
 		return err
 	}
 
@@ -143,7 +188,28 @@ func (s *RelevanceService) DecayAll(ctx context.Context, universeID uuid.UUID) e
 		}
 	}
 
+	states, err := s.entityRepo.ListRelevanceStates(ctx, universeID)
+	if err != nil {
+		log.Printf("[relevance] list graph relevance states for universe %s: %v", universeID, err)
+		return nil
+	}
+	for index := range states {
+		s.syncGraphState(ctx, &states[index])
+	}
+
 	return nil
+}
+
+func (s *RelevanceService) syncGraphState(ctx context.Context, entity *models.Entity) {
+	if s.pool == nil || entity == nil {
+		return
+	}
+	graphRepo := repositories.NewGraphRepo(s.pool)
+	if err := graphRepo.UpdateNodeState(ctx, "universe_"+entity.UniverseID.String(), entity.ID.String(), entity.RelevanceScore, entity.Status); err != nil {
+		// SQL remains the source of truth. Graph synchronization is presentation
+		// enrichment and must never reject a successful writing operation.
+		log.Printf("[relevance] sync graph node %s: %v", entity.ID, err)
+	}
 }
 
 // applyDecay computes the decayed relevance score after idle chapters.

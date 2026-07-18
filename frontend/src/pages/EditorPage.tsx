@@ -5,7 +5,7 @@ import { useEditorStore } from '../stores/editorStore'
 import { useWSStore } from '../stores/wsStore'
 import { useWS } from '../hooks/useWS'
 import { api } from '../lib/api'
-import type { EntityCandidateDTO } from '../lib/types'
+import type { CraftReviewResult, EntityCandidateDTO } from '../lib/types'
 import TipTapEditor from '../components/editor/TipTapEditor'
 import CraftReviewPanel from '../components/editor/CraftReviewPanel'
 import EntityCandidateTray from '../components/editor/EntityCandidateTray'
@@ -27,6 +27,7 @@ const PANEL_STORAGE_KEY = 'quill:editor-workspace-panels'
 const MIN_RAIL_WIDTH = 220
 const MIN_CONTEXT_WIDTH = 260
 const MAX_PANEL_WIDTH = 420
+const CRAFT_REVIEW_TIMEOUT_MS = 45_000
 
 type PanelSide = 'rail' | 'context'
 
@@ -77,6 +78,8 @@ export default function EditorPage() {
   } = useEditorStore()
   const wsStatus = useWSStore((s) => s.status)
   const wsError = useWSStore((s) => s.lastError)
+  const wsErrorRequestId = useWSStore((s) => s.lastErrorRequestId)
+  const clearWSError = useWSStore((s) => s.clearError)
   const sendWS = useWSStore((s) => s.send)
   const craftReviews = useWSStore((s) => s.craftReviews) || []
   const liveCandidates = useWSStore((s) => s.liveCandidates) || []
@@ -101,6 +104,8 @@ export default function EditorPage() {
   const [railWidth, setRailWidth] = useState(() => clampPanelWidth(initialPanelState.railWidth ?? 240, MIN_RAIL_WIDTH))
   const [contextWidth, setContextWidth] = useState(() => clampPanelWidth(initialPanelState.contextWidth ?? 280, MIN_CONTEXT_WIDTH))
   const [craftReviewing, setCraftReviewing] = useState(false)
+  const [craftReview, setCraftReview] = useState<CraftReviewResult | null>(null)
+  const [requestedCraftSkills, setRequestedCraftSkills] = useState<string[] | null>(null)
   const [recoveryDraft, setRecoveryDraft] = useState<ReturnType<typeof getLocalDraft>>(null)
   const [editorKey, setEditorKey] = useState(0)
   const [knownEntities, setKnownEntities] = useState<Array<{ id: string; name: string; type?: string; aliases?: string[] }>>([])
@@ -110,6 +115,17 @@ export default function EditorPage() {
   const [knownEntitiesError, setKnownEntitiesError] = useState<string | null>(null)
   const [chaptersError, setChaptersError] = useState<string | null>(null)
   const previousSaveStatus = useRef<string | null>(null)
+  const craftRequestId = useRef<string | null>(null)
+  const craftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const terminalCraftRequestIds = useRef(new Set<string>())
+
+  const rejectCraftRequest = useCallback((requestId: string | null) => {
+    if (requestId) terminalCraftRequestIds.current.add(requestId)
+    craftRequestId.current = null
+    if (craftTimeoutRef.current) window.clearTimeout(craftTimeoutRef.current)
+    craftTimeoutRef.current = null
+    setCraftReviewing(false)
+  }, [])
 
   useWS()
 
@@ -275,16 +291,33 @@ export default function EditorPage() {
 
   useEffect(() => { void loadSiblingChapters() }, [chapterId, loadSiblingChapters])
 
-  // A result arrives as a separate WS message. Keep the explicit review
-  // button busy until that message is observed; live paragraph analysis never
-  // changes this state.
   useEffect(() => {
-    setCraftReviewing(false)
-  }, [craftReviews.length, wsError])
+    const activeRequestId = craftRequestId.current
+    const matchingReview = craftReviews.find((review) => review.request_id === activeRequestId)
+    if (!matchingReview || !activeRequestId) return
+    if (terminalCraftRequestIds.current.has(matchingReview.request_id)) return
+    setCraftReview(matchingReview)
+    rejectCraftRequest(activeRequestId)
+  }, [craftReviews, rejectCraftRequest])
 
   useEffect(() => {
-    setCraftReviewing(false)
-  }, [chapterId, universeId])
+    // `lastError` also carries connection and unrelated analysis failures.
+    // Only a server error explicitly tagged with this review's request ID can
+    // end its lifecycle; everything else remains observable globally while
+    // this request keeps waiting for its own result or timeout.
+    if (!craftReviewing || !wsError || !craftRequestId.current || wsErrorRequestId !== craftRequestId.current) return
+    rejectCraftRequest(craftRequestId.current)
+    setSubmitError(`Craft review could not finish: ${wsError}`)
+  }, [craftReviewing, rejectCraftRequest, wsError, wsErrorRequestId])
+
+  useEffect(() => {
+    rejectCraftRequest(craftRequestId.current)
+    setCraftReview(null)
+  }, [chapterId, rejectCraftRequest, universeId])
+
+  useEffect(() => () => {
+    rejectCraftRequest(craftRequestId.current)
+  }, [rejectCraftRequest])
 
   useEffect(() => {
     if (!chapterId || saveStatus !== 'failed' || previousSaveStatus.current === 'failed') {
@@ -397,7 +430,16 @@ export default function EditorPage() {
 
   const handleCraftReview = useCallback(({ passage }: { passage: string; from: number; to: number }) => {
     if (!chapterId || !workInfo?.id || !universeId || !passage.trim() || typeof sendWS !== 'function') return
+    const requestId = crypto.randomUUID()
+    // Do not let an old global transport/analysis error immediately fail a
+    // newly submitted craft review.
+    if (typeof clearWSError === 'function') clearWSError()
+    if (craftRequestId.current) terminalCraftRequestIds.current.add(craftRequestId.current)
+    craftRequestId.current = requestId
+    if (craftTimeoutRef.current) window.clearTimeout(craftTimeoutRef.current)
     setCraftReviewing(true)
+    setCraftReview(null)
+    setSubmitError(null)
     sendWS({
       type: 'craft_review_request',
       payload: {
@@ -405,14 +447,16 @@ export default function EditorPage() {
         work_id: workInfo.id,
         chapter_id: chapterId,
         passage: passage.trim(),
+        request_id: requestId,
+        ...(requestedCraftSkills ? { requested_skill_names: requestedCraftSkills } : {}),
       },
     })
-    publish({
-      scope: 'review',
-      status: wsStatus === 'open' ? 'running' : 'queued',
-      message: wsStatus === 'open' ? 'Craft review requested.' : 'Craft review queued until the connection returns.',
-    })
-  }, [chapterId, universeId, workInfo, sendWS, publish, wsStatus])
+    craftTimeoutRef.current = window.setTimeout(() => {
+      if (craftRequestId.current !== requestId) return
+      rejectCraftRequest(requestId)
+      setSubmitError('Craft review took too long. Your text was not changed; try again when live analysis is available.')
+    }, CRAFT_REVIEW_TIMEOUT_MS)
+  }, [chapterId, universeId, workInfo, sendWS, requestedCraftSkills, clearWSError, rejectCraftRequest])
 
   const handleCreateChapter = async () => {
     if (!workInfo?.id || !newChapterTitle.trim() || creatingChapter) return
@@ -457,9 +501,6 @@ export default function EditorPage() {
     : styles.statusClosed
 
   const sorted = [...chapters].sort((a, b) => a.order_index - b.order_index)
-  const craftReview = [...craftReviews]
-    .reverse()
-    .find((review) => review.chapter_id === chapterId) || null
   const effectiveSaveStatus = saveStatus || (isSaving ? 'saving' : lastSavedAt ? 'saved' : 'idle')
   const resizePanel = (side: PanelSide, clientX: number) => {
     if (side === 'rail') {
@@ -669,6 +710,8 @@ export default function EditorPage() {
               universeId={workInfo?.universe_id || universeId || ''}
               workId={workInfo?.id || ''}
               chapterId={chapterId || ''}
+              selectedSkills={requestedCraftSkills}
+              onSelectedSkillsChange={setRequestedCraftSkills}
             />
             <EntityCandidateTray
               candidates={visibleCandidates}

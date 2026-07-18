@@ -44,7 +44,7 @@ export default function BudgetTheater({ budget, items }: BudgetTheaterProps) {
         </div>
         <span className={styles.usedPercent}>{budget.used_percent}% used</span>
       </div>
-      <p className={styles.hint}>The response has reserved room; these values describe the actual budget returned by the recall API.</p>
+      <p className={styles.hint}>A token is a small piece of text, not a word. Quill reserves response room first; entity facts, vector matches, and tool output then compete for the remaining context. “Held back” means an item was retrieved but omitted from this request, not deleted from your story.</p>
 
       <div className={styles.bars}>
         {CATEGORIES.map(({ key, label }) => {

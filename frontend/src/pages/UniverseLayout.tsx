@@ -31,7 +31,7 @@ interface NavigationItem {
 const navigation: NavigationItem[] = [
   { id: 'home', label: 'Home', shortcut: 'Alt+1', to: () => '/dashboard', Icon: Home },
   { id: 'write', label: 'Write', shortcut: 'Alt+2', to: writePath, Icon: PenLine },
-  { id: 'explore', label: 'Explore', shortcut: 'Alt+3', to: (id) => explorePath(id, 'entities'), Icon: Compass },
+  { id: 'explore', label: 'Map', shortcut: 'Alt+3', to: (id) => explorePath(id, 'map'), Icon: Compass },
   { id: 'memory', label: 'Memory', shortcut: 'Alt+4', to: memoryPath, Icon: Brain },
   { id: 'review', label: 'Review', shortcut: 'Alt+5', to: (id) => reviewPath(id, 'issues'), Icon: AlertCircle },
 ]

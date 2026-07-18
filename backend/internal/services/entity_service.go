@@ -25,6 +25,12 @@ type EntityService struct {
 	confidenceThreshold float64
 }
 
+// initialEntityRelevance deliberately starts below the remembered/important
+// range. A model extraction is a candidate fact about a story; actual mentions
+// raise its relevance through RelevanceService instead of making every newly
+// imported entity look equally central at 80%.
+const initialEntityRelevance = 0.50
+
 func NewEntityService(pool *pgxpool.Pool, entityRepo *repositories.EntityRepo, vectorRepo *repositories.VectorRepo, qwenSvc LLMService) *EntityService {
 	return &EntityService{
 		pool: pool, entityRepo: entityRepo, vectorRepo: vectorRepo, qwenSvc: qwenSvc,
@@ -245,7 +251,7 @@ func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUI
 		Properties:     props,
 		Status:         data.Status,
 		Confidence:     data.Confidence,
-		RelevanceScore: 0.8,
+		RelevanceScore: initialEntityRelevance,
 	}
 
 	if err := s.entityRepo.Create(ctx, tx, newEntity); err != nil {
@@ -292,7 +298,8 @@ func (s *EntityService) ResolveOrCreate(ctx context.Context, universeID uuid.UUI
 		return newEntity, "", true, nil
 	}
 
-	// spec: entity creation writes the initial entity_relevance_history row (score 0.8)
+	// Entity creation records the conservative baseline. A real mention appends
+	// another history row after it reinforces the entity.
 	if s.historyRepo != nil {
 		if err := s.historyRepo.AppendOne(ctx, newEntity.ID); err != nil {
 			log.Printf("[entity] append history for new entity %s: %v", newEntity.Name, err)
