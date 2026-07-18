@@ -1,21 +1,40 @@
-# Sprint 7 submission checklist
+# Final submission checklist
 
 Use this as the final handoff checklist. Do not mark external evidence complete until it is
 publicly reachable and reviewed by a human.
 
-## Required submission evidence
+## Deadline
 
-- [ ] Publish the application on Qwen Cloud / Alibaba Cloud and record the public URL.
-- [ ] Open that URL in an incognito browser and verify the demo remains reachable.
-- [ ] Link the public source repository and its explicit license file.
-- [ ] Attach an architecture diagram or a short architecture walkthrough that identifies the
-  React client, Go/Fiber API, PostgreSQL/pgvector/AGE, Qwen API, and WebSocket analysis path.
-- [ ] Record a demo under three minutes: clone or reset the demo universe, write/import,
-  observe analysis, inspect the map, recall lore, and review an issue.
-- [ ] Attach Qwen Cloud / Alibaba deployment evidence and Qwen API configuration evidence
-  without exposing secrets.
-- [ ] Attach OpenAI Codex / GPT-5.6 usage evidence and the required session ID. This is a
-  manual submission artifact; application code and UI tests cannot create it.
+**July 20, 2026 — 5:00 PM EDT (2:00 PM PDT).** Submit the Devpost project before the deadline;
+saved drafts are not a final submission.
+
+## Qwen Cloud / Devpost final form
+
+- [ ] Confirm every entrant is an eligible adult in a Qwen Cloud-supported, non-restricted
+  country/region; appoint the authorized representative for a team submission.
+- [ ] Select **Track 1: MemoryAgent** and add every teammate to the Devpost project.
+- [ ] Write the English description: **what** Quill does, **who** it helps, and **how** persistent
+  memory stores, retrieves, forgets, and budgets story context.
+- [ ] Name Qwen Cloud and the Qwen models/services actually used in the submission's **Built With**
+  field; do not expose `QWEN_API_KEY`.
+- [ ] Provide a public repository URL for judging/testing. Confirm it contains source, assets, setup
+  instructions, and the [MIT License](../LICENSE), and that the OSI license is visible in its About
+  section.
+- [ ] Attach the committed [architecture SVG](assets/quill-architecture.svg), showing frontend,
+  Go/Fiber backend, Qwen Cloud, PostgreSQL/pgvector/AGE, and the WebSocket path.
+- [ ] **Required by the rules:** add a public repository link to a code file demonstrating Alibaba
+  Cloud service/API use for the backend. **Recommended supporting evidence:** add the
+  organizer-requested screenshot of the running backend. Docker Compose is not deployment proof.
+- [ ] Publish a public, functioning demo video on YouTube, Vimeo, or Youku; keep it under three
+  minutes and add its URL. Show the actual application, not mocked runtime data.
+
+## OpenAI Build Week blocker
+
+- [ ] Paste/link the Codex `/feedback` session ID in the final Build Week materials. No ID exists in
+  this repository; code and tests cannot generate it.
+- [ ] Explain the actual GPT-5.6/Codex contribution and human review using the sprint record:
+  writer journey, visible memory proof, accessibility and failure feedback, and submission
+  verification. Do not claim a session, model use, or authorship that cannot be evidenced.
 
 ## Local judge-proof evidence
 

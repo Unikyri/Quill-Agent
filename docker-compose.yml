@@ -88,7 +88,7 @@ services:
       - ./backend/skills:/app/skills:ro
     restart: unless-stopped
 
-  # React Frontend
+  # Current React frontend
   frontend:
     build:
       context: ./frontend

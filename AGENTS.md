@@ -38,8 +38,9 @@ docker compose up -d        # postgres + migrations + backend + frontend
 - Metrics-only smoke tests (no DB):  
   `go test ./backend/eval/ -run 'TestRecall|TestPrecision|TestMRR|TestNDCG' -v`
 
-### Frontend (from `frontend/`)
-- Dev server: `npm run dev`
+### Frontend (from `frontend/`, current SPA)
+- Dev server: `npm run dev` → http://localhost:3000
+- Docker Compose: http://localhost:3001
 - Build (typecheck + build): `npm run build`
 - Tests: `npm run test` (vitest run), `npm run test:watch` for watch mode
 - Run a single test file: `npx vitest run src/path/to/File.test.tsx`
@@ -79,7 +80,7 @@ This is the second thing to understand after the analysis pipeline. It layers se
 Memory HTTP surface (all under `graphH`, see `main.go`): `POST /universes/:id/recall`, `POST /universes/:id/recall/explain`, `GET /universes/:id/memory-status`, `POST /universes/:id/decay`.
 
 ### Memory Theater (frontend)
-`/universe/:universeId/memory` (`frontend/src/pages/MemoryInspectorPage.tsx`, "Memory" tab in `UniverseLayout`) makes the memory subsystem visible for demos. Three inline-SVG "acts" in `frontend/src/components/memory/`: `DecayTimeline` (multi-line decay chart from memory-status history, lifecycle-colored, threshold line at `ARCHIVE_THRESHOLD`), `FusionExplorer` (the five RRF pipelines + fused result + per-item contribution chips, consuming `recall/explain`), and `BudgetTheater` (token-budget bars, fitted vs dropped). All inline SVG — no charting library (see `design.md`).
+`/universe/:universeId/memory` (`frontend/src/pages/MemoryInspectorPage.tsx`, "Memory" tab in `UniverseLayout`) makes the memory subsystem visible for demos. Three inline-SVG "acts" in `frontend/src/components/memory/`: `DecayTimeline` (multi-line decay chart from memory-status history, lifecycle-colored, threshold line at `ARCHIVE_THRESHOLD`), `FusionExplorer` (the five RRF pipelines + fused result + per-item contribution chips, consuming `recall/explain`), and `BudgetTheater` (token-budget bars, fitted vs dropped). All use inline SVG; no charting library is used.
 
 ### Data model layering
 Each domain (`universe`, `work`, `chapter`, `entity`, `contradiction`, `timeline_event`, `plot_hole`, `ingestion_job`, plus the memory-subsystem tables `consolidated_memory` and `entity_relevance_history`) follows the same three-layer shape: `repositories/*_repo.go` (raw pgx SQL) → `services/*_service.go` (business logic, orchestrates repos + Qwen) → `handlers/*.go` (Fiber HTTP handlers). Cross-domain reads (e.g. graph + vector + entity together) go through `MemoryService` rather than handlers reaching into multiple repos directly. There is also a `DemoService` (`POST /api/v1/demo/clone` · `/reset`) that deep-copies a seeded template universe — including its AGE graph via `GraphRepo.QueryTemplateEdgesTx` — for a one-click demo.
@@ -91,7 +92,7 @@ Each domain (`universe`, `work`, `chapter`, `entity`, `contradiction`, `timeline
 Zustand stores in `frontend/src/stores/` mirror backend domains (`authStore`, `universeStore`, `editorStore`, `graphStore`, `wsStore`). `wsStore` owns the single WebSocket connection and dispatches incoming typed messages (matching `ws/protocol.go`'s `Type*` constants) out to the other stores — check `wsStore.ts` when adding a new server→client message type, both the Go constant and the frontend switch need updating together. `lib/api.ts` is a thin fetch wrapper injecting the JWT from `localStorage`.
 
 ### Design language
-`design.md` documents a strict "manuscript-modern" visual system (teal/gold/tan palette via `:root` tokens in `index.css`, Newsreader + Spline Sans typography, inline Unicode/SVG glyph icons instead of an icon library, and lightweight CSS `@keyframes` — the old GSAP/ScrollTrigger system is retired, no charting library). Consult it before touching UI components or adding colors/animations/data-viz, since it constrains palette, motion, and chart style project-wide.
+The frontend uses a strict "manuscript-modern" visual system: teal/gold/tan palette via `:root` tokens in `index.css`, Newsreader + Spline Sans typography, inline Unicode/SVG glyph icons instead of an icon library, and lightweight CSS `@keyframes`. The old GSAP/ScrollTrigger system and charting libraries are retired; preserve these constraints when touching UI components, colors, motion, or data visualizations.
 
 ## Notes
 - `.env.example` is used as the template referenced in the README's quick start; when editing it keep placeholder-style values (it is committed to git).

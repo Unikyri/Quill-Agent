@@ -42,5 +42,12 @@ backend/*.test
 
 # Prototype / Design mockups
 QuillNewFront/
+web/
+
+# Windows alternate data streams
+*:Zone.Identifier
+
+# Local acceptance-test fixture
+Docs/El-Despertar-Del-Leviatan-Parte-01.pdf
 
 .codex/
