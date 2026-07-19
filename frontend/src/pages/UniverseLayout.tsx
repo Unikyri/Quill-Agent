@@ -4,7 +4,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'reac
 import { useFeedback } from '../components/feedback'
 import { GenreTagPicker } from '../components/genres'
 import { UniverseContext, type UniverseContextValue } from '../contexts/UniverseContext'
-import { explorePath, memoryPath, profileMemoryPath, reviewPath, writePath } from '../lib/canonicalRoutes'
+import { explorePath, memoryPath, profileIntegrationsPath, profileMemoryPath, reviewPath, writePath } from '../lib/canonicalRoutes'
 import { api } from '../lib/api'
 import { useWS } from '../hooks/useWS'
 import { useAuthStore } from '../stores/authStore'
@@ -524,6 +524,9 @@ export default function UniverseLayout() {
                   <NavLink className={styles.menuItem} role="menuitem" to={profileMemoryPath()} onClick={() => setAccountOpen(false)}>
                     <User aria-hidden="true" size={15} />
                     Writer profile
+                  </NavLink>
+                  <NavLink className={styles.menuItem} role="menuitem" to={profileIntegrationsPath()} onClick={() => setAccountOpen(false)}>
+                    Integrations
                   </NavLink>
                   <button className={styles.menuItem} role="menuitem" type="button" onClick={logout}>
                     <LogOut aria-hidden="true" size={15} />

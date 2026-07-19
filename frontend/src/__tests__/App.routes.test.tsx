@@ -32,6 +32,7 @@ vi.mock('../pages/KnowledgeGraphPage', () => ({ default: () => <div>Map route</d
 vi.mock('../pages/MemoryInspectorPage', () => ({ default: () => <div>Memory route</div> }))
 vi.mock('../pages/ReviewPage', () => ({ default: () => <div>Review route</div> }))
 vi.mock('../pages/WriterProfilePage', () => ({ default: () => <div>Writer profile route</div> }))
+vi.mock('../pages/IntegrationsPage', () => ({ default: () => <div>Integrations route</div> }))
 
 function LocationProbe() {
   const location = useLocation()
@@ -106,5 +107,13 @@ describe('App account-scoped routes', () => {
     renderRoute('/profile')
 
     await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/profile/memory'))
+  })
+
+  it('renders Integrations outside the universe-nested layout', async () => {
+    renderRoute('/profile/integrations')
+
+    await waitFor(() => expect(screen.getByText('Profile shell')).toBeInTheDocument())
+    expect(await screen.findByText('Integrations route')).toBeInTheDocument()
+    expect(screen.queryByText('Universe shell')).not.toBeInTheDocument()
   })
 })

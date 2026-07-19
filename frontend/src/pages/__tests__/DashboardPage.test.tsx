@@ -73,6 +73,11 @@ describe('DashboardPage', () => {
     expect(await screen.findByRole('link', { name: /writer profile/i })).toHaveAttribute('href', '/profile/memory')
   })
 
+  it('links to the account-scoped Integrations screen', async () => {
+    renderPage()
+    expect(await screen.findByRole('link', { name: /integrations/i })).toHaveAttribute('href', '/profile/integrations')
+  })
+
   it('shows real universe details and sends the primary CTA to Write', async () => {
     mockListUniverses.mockResolvedValue({
       universes: [

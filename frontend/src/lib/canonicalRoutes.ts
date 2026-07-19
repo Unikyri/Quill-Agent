@@ -31,3 +31,7 @@ export function reviewPath(universeId: string, view: ReviewView): string {
 export function profileMemoryPath(): string {
   return '/profile/memory'
 }
+
+export function profileIntegrationsPath(): string {
+  return '/profile/integrations'
+}

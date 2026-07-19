@@ -4,11 +4,10 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import styles from './ProfileLayout.module.css'
 
-// The first account-scoped (not universe-nested) authenticated shell. Kept
-// deliberately thin: one nav entry today (Writer profile); Phase 6 adds
-// Integrations as a second entry to this same array, no restructuring needed.
+// The first account-scoped (not universe-nested) authenticated shell.
 const navigation = [
   { to: '/profile/memory', label: 'Writer profile' },
+  { to: '/profile/integrations', label: 'Integrations' },
 ]
 
 export default function ProfileLayout() {

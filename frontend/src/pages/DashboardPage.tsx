@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { GenreTagPicker } from '../components/genres'
 import { useFeedback } from '../components/feedback'
 import { api } from '../lib/api'
-import { profileMemoryPath } from '../lib/canonicalRoutes'
+import { profileIntegrationsPath, profileMemoryPath } from '../lib/canonicalRoutes'
 import { GENRE_OPTIONS } from '../lib/genres'
 import styles from './DashboardPage.module.css'
 
@@ -259,6 +259,7 @@ export default function DashboardPage() {
     <main className={styles.layout}>
       <nav className={styles.accountNav} aria-label="Account">
         <Link className={styles.accountLink} to={profileMemoryPath()}>Writer profile</Link>
+        <Link className={styles.accountLink} to={profileIntegrationsPath()}>Integrations</Link>
       </nav>
 
       <section className={styles.hero} aria-labelledby="home-title">

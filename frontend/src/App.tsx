@@ -20,6 +20,7 @@ const KnowledgeGraphPage = lazy(() => import('./pages/KnowledgeGraphPage'))
 const MemoryInspectorPage = lazy(() => import('./pages/MemoryInspectorPage'))
 const ReviewPage = lazy(() => import('./pages/ReviewPage'))
 const WriterProfilePage = lazy(() => import('./pages/WriterProfilePage'))
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'))
 
 function MissingUniverseRedirect() {
   return <Navigate to="/dashboard" replace />
@@ -115,6 +116,7 @@ export function AppRoutes() {
         <Route path="/profile" element={<ProtectedRoute><ProfileLayout /></ProtectedRoute>}>
           <Route index element={<Navigate to="memory" replace />} />
           <Route path="memory" element={<RouteLoadBoundary label="Loading writer profile…"><WriterProfilePage /></RouteLoadBoundary>} />
+          <Route path="integrations" element={<RouteLoadBoundary label="Loading integrations…"><IntegrationsPage /></RouteLoadBoundary>} />
         </Route>
 
         {/* Legacy redirects */}

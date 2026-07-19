@@ -231,6 +231,14 @@ describe('UniverseLayout', () => {
     expect(screen.getByRole('menuitem', { name: /writer profile/i })).toHaveAttribute('href', '/profile/memory')
   })
 
+  it('links to the account-scoped Integrations screen from the account menu', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(await screen.findByRole('button', { name: 'Open account menu' }))
+    expect(screen.getByRole('menuitem', { name: /integrations/i })).toHaveAttribute('href', '/profile/integrations')
+  })
+
   it('supports Alt+number navigation without intercepting editor typing', async () => {
     renderLayout()
     await waitFor(() => expect(screen.getByText('Write content')).toBeInTheDocument())

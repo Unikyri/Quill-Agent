@@ -42,6 +42,11 @@ describe('ProfileLayout', () => {
     expect(screen.getByText('Writer profile content')).toBeInTheDocument()
   })
 
+  it('links to Integrations from the account-scoped nav', () => {
+    renderLayout()
+    expect(screen.getByRole('link', { name: /integrations/i })).toHaveAttribute('href', '/profile/integrations')
+  })
+
   it('signs the writer out from the account menu', async () => {
     const user = userEvent.setup()
     renderLayout()
