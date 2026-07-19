@@ -49,6 +49,38 @@
   flex-shrink: 0;
 }
 
+/* Craft-review trigger */
+.craftReviewRow {
+  padding: 8px 12px;
+  background: var(--bg-rail);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.craftReviewBtn {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-live);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent-live) 8%, transparent);
+  color: var(--accent-live);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.12s;
+}
+.craftReviewBtn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-live) 16%, transparent); }
+.craftReviewBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.craftHint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-style: italic;
+}
+
 .analysisStatusList {
   display: grid;
   gap: 1px;

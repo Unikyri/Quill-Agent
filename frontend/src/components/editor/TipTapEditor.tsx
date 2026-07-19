@@ -51,16 +51,19 @@ function Toolbar({
   setFontSize,
   onCraftReview,
   reviewing,
+  selectionEmpty,
 }: {
   editor: Editor | null
   fontSize: number
   setFontSize: (s: number) => void
   onCraftReview?: (selection: { passage: string; from: number; to: number }) => void
   reviewing?: boolean
+  selectionEmpty: boolean
 }) {
   if (!editor) return null
   return (
-    <div className={styles.toolbar}>
+    <>
+      <div className={styles.toolbar}>
       <ToolbarButton title="Decrease font size" onClick={() => setFontSize(Math.max(12, fontSize - 1))}>
         <span style={{ fontSize: 13 }}>A-</span>
       </ToolbarButton>
@@ -134,13 +137,13 @@ function Toolbar({
       >
         "
       </ToolbarButton>
+      </div>
       {onCraftReview && (
-        <>
-          <div className={styles.toolbarDivider} />
-          <ToolbarButton
-            title={reviewing ? 'Reviewing selection…' : 'Review selected passage'}
-            ariaLabel="Review selected passage"
-            disabled={reviewing || editor.state.selection.empty}
+        <div className={styles.craftReviewRow}>
+          <button
+            type="button"
+            className={styles.craftReviewBtn}
+            disabled={reviewing || selectionEmpty}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               const { from, to } = editor.state.selection
@@ -148,11 +151,14 @@ function Toolbar({
               if (passage) onCraftReview({ passage, from, to })
             }}
           >
-            {reviewing ? '◌' : '✦'}
-          </ToolbarButton>
-        </>
+            {reviewing ? 'Reviewing your passage…' : 'Ask for a craft review →'}
+          </button>
+          {selectionEmpty && !reviewing && (
+            <p className={styles.craftHint}>(select a passage first)</p>
+          )}
+        </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -176,6 +182,7 @@ export default function TipTapEditor({
   const submissionSequenceRef = useRef(0)
   const [fontSize, setFontSize] = useState(17)
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null)
+  const [selectionEmpty, setSelectionEmpty] = useState(true)
   const chapterSubmissions = Object.values(submissions)
     .filter((submission) => submission.chapterId === chapterId)
     .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -226,6 +233,23 @@ export default function TipTapEditor({
     },
   })
 
+  // useEditor's TipTap instance doesn't re-render this component on selection-only
+  // changes, so the craft-review button/caption would show stale disabled state.
+  // Subscribe directly and mirror selection emptiness into React state.
+  useEffect(() => {
+    if (!editor) return
+    const updateSelectionEmpty = () => setSelectionEmpty(editor.state.selection.empty)
+    updateSelectionEmpty()
+    // 'transaction' also covers programmatic doc changes that move the
+    // selection without firing a separate 'selectionUpdate' event.
+    editor.on('selectionUpdate', updateSelectionEmpty)
+    editor.on('transaction', updateSelectionEmpty)
+    return () => {
+      editor.off('selectionUpdate', updateSelectionEmpty)
+      editor.off('transaction', updateSelectionEmpty)
+    }
+  }, [editor])
+
   // Keep the ProseMirror plugin instance stable while live candidates arrive.
   // Recreating TipTap here would reset the document selection/cursor on every
   // WebSocket event; plugin metadata lets it rebuild only its decorations.
@@ -257,6 +281,7 @@ export default function TipTapEditor({
         setFontSize={setFontSize}
         onCraftReview={onCraftReview}
         reviewing={reviewing}
+        selectionEmpty={selectionEmpty}
       />
       {chapterSubmissions.length > 0 && <AnalysisStatusList submissions={chapterSubmissions} />}
       {selectedCandidateId && onCandidateDecision && (() => {
