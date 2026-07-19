@@ -29,11 +29,27 @@ vi.mock('cytoscape-fcose', () => ({ default: {} }))
 // CSS module mock
 vi.mock('../KnowledgeGraphPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 
-// EntityOverviewTab has its own dedicated test suite — stub it here so this
-// suite only asserts the shell wires the right entityId in, not its internals.
+// Each tab component has its own dedicated test suite — stub them here so
+// this suite only asserts the shell wires the right entityId/universeId in,
+// not their internals.
 vi.mock('../../components/knowledge-graph/EntityOverviewTab', () => ({
   default: ({ entityId }: { entityId: string }) => (
     <div data-testid="entity-overview-tab">Overview for {entityId}</div>
+  ),
+}))
+vi.mock('../../components/knowledge-graph/RelationshipsTab', () => ({
+  default: ({ entityId, universeId }: { entityId: string; universeId: string }) => (
+    <div data-testid="relationships-tab">Relationships for {entityId} in {universeId}</div>
+  ),
+}))
+vi.mock('../../components/knowledge-graph/MentionsTab', () => ({
+  default: ({ entityId, universeId }: { entityId: string; universeId: string }) => (
+    <div data-testid="mentions-tab">Mentions for {entityId} in {universeId}</div>
+  ),
+}))
+vi.mock('../../components/knowledge-graph/RelevanceHistoryTab', () => ({
+  default: ({ entityId, universeId }: { entityId: string; universeId: string }) => (
+    <div data-testid="relevance-history-tab">Relevance history for {entityId} in {universeId}</div>
   ),
 }))
 
@@ -315,7 +331,7 @@ describe('KnowledgeGraphPage', () => {
       expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
     })
 
-    it('switches to a placeholder when a not-yet-implemented tab is clicked, and back', async () => {
+    it('switches between tabs, wiring entityId/universeId into each, and back to Overview', async () => {
       mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1 }, pagination: { total: 1 } })
       mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
       renderPage()
@@ -325,13 +341,13 @@ describe('KnowledgeGraphPage', () => {
       fireEvent.click(screen.getByRole('tab', { name: 'Relationships' }))
       expect(screen.queryByTestId('entity-overview-tab')).not.toBeInTheDocument()
       expect(screen.getByRole('tab', { name: 'Relationships' })).toHaveAttribute('aria-selected', 'true')
-      expect(screen.getByText('Relationships view is coming soon.')).toBeInTheDocument()
+      expect(screen.getByTestId('relationships-tab')).toHaveTextContent('Relationships for n1 in uni-1')
 
       fireEvent.click(screen.getByRole('tab', { name: 'Mentions' }))
-      expect(screen.getByText('Mentions view is coming soon.')).toBeInTheDocument()
+      expect(screen.getByTestId('mentions-tab')).toHaveTextContent('Mentions for n1 in uni-1')
 
       fireEvent.click(screen.getByRole('tab', { name: 'Relevance history' }))
-      expect(screen.getByText('Relevance history is coming soon.')).toBeInTheDocument()
+      expect(screen.getByTestId('relevance-history-tab')).toHaveTextContent('Relevance history for n1 in uni-1')
 
       fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
       expect(screen.getByTestId('entity-overview-tab')).toBeInTheDocument()
@@ -353,7 +369,7 @@ describe('KnowledgeGraphPage', () => {
       await waitFor(() => screen.getByTestId('entity-overview-tab'))
 
       fireEvent.click(screen.getByRole('tab', { name: 'Relationships' }))
-      expect(screen.getByText('Relationships view is coming soon.')).toBeInTheDocument()
+      expect(screen.getByTestId('relationships-tab')).toBeInTheDocument()
 
       fireEvent.click(within(nav).getByText('Bob'))
 
@@ -361,6 +377,26 @@ describe('KnowledgeGraphPage', () => {
         expect(screen.getByTestId('entity-overview-tab')).toHaveTextContent('Overview for n2')
       })
       expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+    })
+  })
+
+  // ── a11y "Keyboard map" section: entities-only now that Relationships
+  // moved into its own tab (entity-scoped, replacing the whole-map list) ──
+  describe('accessible entity summary', () => {
+    it('lists visible entities without the removed whole-map relationships list', async () => {
+      mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1 }, pagination: { total: 1 } })
+      mockGetEntityNeighbors.mockResolvedValue({
+        nodes: [aliceNode()],
+        edges: [],
+        truncated: false,
+        limits: graphLimits,
+      })
+      renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Entities' })).toBeInTheDocument()
+      })
+      expect(screen.queryByRole('heading', { name: 'Relationships' })).not.toBeInTheDocument()
     })
   })
 })

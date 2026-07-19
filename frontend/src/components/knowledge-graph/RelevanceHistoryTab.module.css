@@ -1,0 +1,7 @@
+/* ── Relevance-history tab (Story Graph right panel) ─────────────────── */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}

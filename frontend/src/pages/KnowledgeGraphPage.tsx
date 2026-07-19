@@ -5,9 +5,11 @@ import GraphCanvas from '../components/knowledge-graph/GraphCanvas'
 import GraphControls from '../components/knowledge-graph/GraphControls'
 import TimelineSlider from '../components/knowledge-graph/TimelineSlider'
 import EntityOverviewTab from '../components/knowledge-graph/EntityOverviewTab'
+import RelationshipsTab from '../components/knowledge-graph/RelationshipsTab'
+import MentionsTab from '../components/knowledge-graph/MentionsTab'
+import RelevanceHistoryTab from '../components/knowledge-graph/RelevanceHistoryTab'
 import PageStatus from '../components/shared/PageStatus'
 import { UniverseContext } from '../contexts/UniverseContext'
-import { relationText } from '../lib/graphElements'
 import { writeImportPath } from '../lib/canonicalRoutes'
 import { api } from '../lib/api'
 import { ENTITY_TYPES, ENTITY_TYPE_META, type EntityType } from '../lib/entityTypes'
@@ -32,11 +34,11 @@ function getInitial(name: string) {
 
 type DetailTab = 'overview' | 'relationships' | 'mentions' | 'relevance'
 
-const DETAIL_TABS: Array<{ id: DetailTab; label: string; placeholder?: string }> = [
+const DETAIL_TABS: Array<{ id: DetailTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
-  { id: 'relationships', label: 'Relationships', placeholder: 'Relationships view is coming soon.' },
-  { id: 'mentions', label: 'Mentions', placeholder: 'Mentions view is coming soon.' },
-  { id: 'relevance', label: 'Relevance history', placeholder: 'Relevance history is coming soon.' },
+  { id: 'relationships', label: 'Relationships' },
+  { id: 'mentions', label: 'Mentions' },
+  { id: 'relevance', label: 'Relevance history' },
 ]
 
 export default function KnowledgeGraphPage() {
@@ -51,7 +53,6 @@ export default function KnowledgeGraphPage() {
   const nodes = useGraphStore((state) => state.nodes)
   const edges = useGraphStore((state) => state.edges)
   const selectedNodeId = useGraphStore((state) => state.selectedNodeId)
-  const selectedEdgeId = useGraphStore((state) => state.selectedEdgeId)
   const focalNodeId = useGraphStore((state) => state.focalNodeId)
   const breadcrumb = useGraphStore((state) => state.breadcrumb)
   const nodeFilter = useGraphStore((state) => state.nodeFilter)
@@ -60,7 +61,6 @@ export default function KnowledgeGraphPage() {
   const limits = useGraphStore((state) => state.limits)
   const focusNode = useGraphStore((state) => state.focusNode)
   const goBack = useGraphStore((state) => state.goBack)
-  const selectEdge = useGraphStore((state) => state.selectEdge)
   const graphPings = useWSStore((state) => state.graphPings)
   const previousPingCount = useRef(graphPings.length)
 
@@ -347,12 +347,15 @@ export default function KnowledgeGraphPage() {
               ))}
             </div>
             <div className={styles.tabPanel} role="tabpanel">
-              {activeTab === 'overview' ? (
-                <EntityOverviewTab entityId={detailEntityId} />
-              ) : (
-                <p className={styles.tabPlaceholder}>
-                  {DETAIL_TABS.find((tab) => tab.id === activeTab)?.placeholder}
-                </p>
+              {activeTab === 'overview' && <EntityOverviewTab entityId={detailEntityId} />}
+              {activeTab === 'relationships' && universeId && (
+                <RelationshipsTab entityId={detailEntityId} universeId={universeId} />
+              )}
+              {activeTab === 'mentions' && universeId && (
+                <MentionsTab entityId={detailEntityId} universeId={universeId} />
+              )}
+              {activeTab === 'relevance' && universeId && (
+                <RelevanceHistoryTab entityId={detailEntityId} universeId={universeId} />
               )}
             </div>
           </section>
@@ -369,31 +372,11 @@ export default function KnowledgeGraphPage() {
             <FileQuestion size={15} aria-hidden="true" />
             <div>
               <p className={styles.kicker}>Keyboard map</p>
-              <h2 id="map-summary-heading">Entities and relationships</h2>
+              <h2 id="map-summary-heading">Entities</h2>
             </div>
           </div>
-          <p className={styles.summaryCopy}>This list mirrors the visible map and can be used without the canvas.</p>
+          <p className={styles.summaryCopy}>This list mirrors the visible map and can be used without the canvas. Select an entity to see its relationships in the Relationships tab above.</p>
 
-          <h3>Relationships</h3>
-          {visibleEdges.length > 0 ? (
-            <ul className={styles.relationshipList}>
-              {visibleEdges.map((edge) => (
-                <li key={edge.id}>
-                  <button
-                    type="button"
-                    aria-pressed={selectedEdgeId === edge.id}
-                    onClick={() => selectEdge(edge.id)}
-                  >
-                    {relationText(edge, nodes)}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className={styles.unavailable}>No relationships are available for the visible entities.</p>
-          )}
-
-          <h3>Entities</h3>
           <ul className={styles.entityList}>
             {visibleNodes.map((node) => (
               <li key={node.id}>
