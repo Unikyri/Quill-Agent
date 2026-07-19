@@ -189,6 +189,44 @@ func (f fakeGraphInventory) ListGraphInventory(_ context.Context, _ uuid.UUID) (
 	return f.entities, f.err
 }
 
+// GetMentionsByEntity/CountMentions: no-op defaults so fakeGraphInventory
+// value literals used only for FullGraph/inventory tests still satisfy
+// graphEntityInventory without every call site caring about mentions.
+func (f fakeGraphInventory) GetMentionsByEntity(_ context.Context, _ uuid.UUID, _ int) ([]models.EntityMention, error) {
+	return nil, nil
+}
+
+func (f fakeGraphInventory) CountMentions(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+// fakeMentionInventory extends fakeGraphInventory-shaped behavior with the
+// mention lookups Mentions needs; kept separate so existing ListGraphInventory
+// callers/tests are unaffected.
+type fakeMentionInventory struct {
+	fakeGraphInventory
+	mentions    []models.EntityMention
+	total       int
+	mentionsErr error
+	countErr    error
+	gotLimit    int
+}
+
+func (f *fakeMentionInventory) GetMentionsByEntity(_ context.Context, _ uuid.UUID, limit int) ([]models.EntityMention, error) {
+	f.gotLimit = limit
+	if f.mentionsErr != nil {
+		return nil, f.mentionsErr
+	}
+	return f.mentions, nil
+}
+
+func (f *fakeMentionInventory) CountMentions(_ context.Context, _ uuid.UUID) (int, error) {
+	if f.countErr != nil {
+		return 0, f.countErr
+	}
+	return f.total, nil
+}
+
 func (f fakeUniverseOwnerResolver) FindByID(_ context.Context, _ uuid.UUID) (*models.Universe, error) {
 	return f.universe, nil
 }
@@ -492,6 +530,185 @@ func TestGraphHandlerFullGraphMissingGraph(t *testing.T) {
 	}
 	if string(nodes) != "[]" || string(edges) != "[]" {
 		t.Errorf("expected empty arrays, got nodes=%s edges=%s", nodes, edges)
+	}
+}
+
+// ── Mentions handler tests ──
+
+func TestGraphHandlerMentionsInvalidEntityID(t *testing.T) {
+	app := fiber.New()
+	h := NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), nil)
+	app.Get("/api/v1/entities/:id/mentions", h.Mentions)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/bad/mentions?universe_id="+uuid.New().String(), nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+	var body map[string]map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"]["code"] != "VALIDATION_ERROR" {
+		t.Errorf("expected VALIDATION_ERROR code, got %v", body["error"]["code"])
+	}
+}
+
+func TestGraphHandlerMentionsInvalidUniverseID(t *testing.T) {
+	app := fiber.New()
+	h := NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), nil)
+	app.Get("/api/v1/entities/:id/mentions", h.Mentions)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+uuid.New().String()+"/mentions?universe_id=bad", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestGraphHandlerMentionsSuccess(t *testing.T) {
+	app := fiber.New()
+	entityID := uuid.New()
+	chapterID := uuid.New()
+	fake := &fakeMentionInventory{
+		mentions: []models.EntityMention{
+			{ID: uuid.New(), EntityID: entityID, ChapterID: chapterID, ParagraphIndex: 2, ContextSnippet: "she walked in"},
+			{ID: uuid.New(), EntityID: entityID, ChapterID: chapterID, ParagraphIndex: 5, ContextSnippet: "she left"},
+		},
+		total: 5,
+	}
+	h := &GraphHandler{
+		graphRepo:  &stubGraphQuerier{},
+		memorySvc:  services.NewMemoryService(nil, nil, nil),
+		entityRepo: fake,
+	}
+	app.Get("/api/v1/entities/:id/mentions", h.Mentions)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID.String()+"/mentions?universe_id="+uuid.New().String(), nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body struct {
+		Mentions []models.EntityMention `json:"mentions"`
+		Total    int                    `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Mentions) != 2 {
+		t.Fatalf("mentions = %#v, want 2", body.Mentions)
+	}
+	if body.Total != 5 {
+		t.Errorf("total = %d, want 5", body.Total)
+	}
+	if fake.gotLimit != 50 {
+		t.Errorf("expected default limit 50, got %d", fake.gotLimit)
+	}
+}
+
+func TestGraphHandlerMentionsZeroResults(t *testing.T) {
+	app := fiber.New()
+	entityID := uuid.New()
+	fake := &fakeMentionInventory{mentions: []models.EntityMention{}, total: 0}
+	h := &GraphHandler{
+		graphRepo:  &stubGraphQuerier{},
+		memorySvc:  services.NewMemoryService(nil, nil, nil),
+		entityRepo: fake,
+	}
+	app.Get("/api/v1/entities/:id/mentions", h.Mentions)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID.String()+"/mentions?universe_id="+uuid.New().String(), nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body struct {
+		Mentions []models.EntityMention `json:"mentions"`
+		Total    int                    `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Mentions) != 0 {
+		t.Fatalf("mentions = %#v, want empty", body.Mentions)
+	}
+	if body.Total != 0 {
+		t.Errorf("total = %d, want 0", body.Total)
+	}
+}
+
+func TestGraphHandlerMentionsClampsLimit(t *testing.T) {
+	app := fiber.New()
+	entityID := uuid.New()
+	fake := &fakeMentionInventory{}
+	h := &GraphHandler{
+		graphRepo:  &stubGraphQuerier{},
+		memorySvc:  services.NewMemoryService(nil, nil, nil),
+		entityRepo: fake,
+	}
+	app.Get("/api/v1/entities/:id/mentions", h.Mentions)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID.String()+"/mentions?universe_id="+uuid.New().String()+"&limit=9999", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if fake.gotLimit != 200 {
+		t.Errorf("expected limit clamped to 200, got %d", fake.gotLimit)
+	}
+}
+
+func TestGraphHandlerMentionsRejectsForeignUniverse(t *testing.T) {
+	entityID := uuid.New()
+
+	app := fiber.New()
+	h := NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), nil)
+	h.SetUniverseOwnerRepo(fakeUniverseOwnerResolver{universe: &models.Universe{UserID: uuid.New()}})
+	app.Get("/api/v1/entities/:id/mentions", h.Mentions)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID.String()+"/mentions?universe_id="+uuid.New().String(), nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 when no authenticated user is present", resp.StatusCode)
+	}
+
+	app = fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		return c.Next()
+	})
+	h = NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), nil)
+	h.SetUniverseOwnerRepo(fakeUniverseOwnerResolver{universe: &models.Universe{UserID: uuid.New()}})
+	app.Get("/api/v1/entities/:id/mentions", h.Mentions)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+entityID.String()+"/mentions?universe_id="+uuid.New().String(), nil)
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test foreign user: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a foreign universe", resp.StatusCode)
 	}
 }
 

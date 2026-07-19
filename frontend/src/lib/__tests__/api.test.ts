@@ -166,6 +166,41 @@ describe('api', () => {
     })
   })
 
+  describe('getEntityMentions', () => {
+    it('calls GET /entities/:id/mentions with universe_id and default limit, returns typed shape', async () => {
+      const mentions = [
+        {
+          id: 'm1',
+          entity_id: 'e1',
+          chapter_id: 'c1',
+          paragraph_index: 2,
+          character_offset: 40,
+          context_snippet: 'she walked in',
+          mention_type: 'explicit',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ]
+      mockFetchResponse({ mentions, total: 1 })
+
+      const result = await api.getEntityMentions('e1', 'uni-1')
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${API_BASE}/entities/e1/mentions?universe_id=uni-1&limit=50`)
+      expect(result.mentions).toEqual(mentions)
+      expect(result.total).toBe(1)
+    })
+
+    it('forwards a custom limit', async () => {
+      mockFetchResponse({ mentions: [], total: 0 })
+
+      await api.getEntityMentions('e1', 'uni-1', 10)
+
+      const [url] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${API_BASE}/entities/e1/mentions?universe_id=uni-1&limit=10`)
+    })
+  })
+
   describe('demo endpoints', () => {
     it('sends the opaque demo session separately from the bearer token', async () => {
       const bearerToken = 'jwt-bearer-token'

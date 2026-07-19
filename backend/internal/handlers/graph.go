@@ -23,6 +23,8 @@ type graphQuerier interface {
 
 type graphEntityInventory interface {
 	ListGraphInventory(ctx context.Context, universeID uuid.UUID) ([]models.Entity, error)
+	GetMentionsByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]models.EntityMention, error)
+	CountMentions(ctx context.Context, entityID uuid.UUID) (int, error)
 }
 
 // graphTraversalTimeout bounds an AGE request without setting mutable session
@@ -214,6 +216,57 @@ func (h *GraphHandler) Neighbors(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(traversal)
+}
+
+// Mentions returns the persisted mention records for a graph entity.
+// GET /api/v1/entities/:id/mentions?universe_id=X&limit=N
+func (h *GraphHandler) Mentions(c *fiber.Ctx) error {
+	entityID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid entity ID"},
+		})
+	}
+
+	universeID, err := uuid.Parse(c.Query("universe_id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
+		})
+	}
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
+	}
+
+	limit := c.QueryInt("limit", 50)
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	mentions, err := h.entityRepo.GetMentionsByEntity(c.Context(), entityID, limit)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+		})
+	}
+	if mentions == nil {
+		mentions = []models.EntityMention{}
+	}
+
+	total, err := h.entityRepo.CountMentions(c.Context(), entityID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"mentions": mentions,
+		"total":    total,
+	})
 }
 
 // Recall returns contextually-relevant entities via the memory service.

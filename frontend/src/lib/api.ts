@@ -49,6 +49,24 @@ export interface EntityNeighborhoodDTO {
   limits: GraphTraversalLimitsDTO
 }
 
+// Matches models.EntityMention's JSON tags.
+export interface EntityMentionDTO {
+  id: string
+  entity_id: string
+  chapter_id: string
+  paragraph_index: number
+  character_offset: number
+  paragraph_node_id?: string
+  context_snippet?: string
+  mention_type?: string
+  created_at: string
+}
+
+export interface EntityMentionsResponse {
+  mentions: EntityMentionDTO[]
+  total: number
+}
+
 // Matches models.TimelineEvent's JSON tags. timeline_position orders events
 // (lower = earlier); it is a relative float, not a literal date.
 export interface TimelineEventDTO {
@@ -190,6 +208,9 @@ export const api = {
 
   getEntityNeighbors: (id: string, universeId: string, hops = 1) =>
     request<EntityNeighborhoodDTO>(`/entities/${id}/neighbors?universe_id=${universeId}&hops=${hops}`),
+
+  getEntityMentions: (id: string, universeId: string, limit = 50) =>
+    request<EntityMentionsResponse>(`/entities/${id}/mentions?universe_id=${universeId}&limit=${limit}`),
 
   // Health
   health: () => request<any>('/health'),

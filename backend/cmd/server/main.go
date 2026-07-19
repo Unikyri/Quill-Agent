@@ -278,6 +278,7 @@ func main() {
 	api.Put("/universes/:universe_id/plot-holes/:id/dismiss", plotHoleH.Dismiss)
 	api.Get("/universes/:universe_id/graph", graphH.FullGraph)
 	api.Get("/entities/:id/neighbors", graphH.Neighbors)
+	api.Get("/entities/:id/mentions", graphH.Mentions)
 	api.Post("/universes/:id/recall", graphH.Recall)
 	api.Post("/universes/:id/recall/explain", graphH.RecallExplain)
 	api.Get("/universes/:id/memory-status", graphH.MemoryStatus)
