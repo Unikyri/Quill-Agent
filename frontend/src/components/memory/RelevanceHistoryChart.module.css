@@ -1,0 +1,6 @@
+.svg { display: block; width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 10px 0 0; padding: 0; list-style: none; }
+.legendItem { display: flex; align-items: center; gap: 5px; color: var(--muted-2); font-size: 12px; }
+.legendDot { width: 7px; height: 7px; border-radius: 50%; }
+.relevanceFigure { color: var(--accent-live); font-weight: 600; }
+.emptyPlaceholder { color: var(--muted-2); font-size: 13px; line-height: 1.5; }

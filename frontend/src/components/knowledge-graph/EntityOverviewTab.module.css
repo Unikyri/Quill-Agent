@@ -1,0 +1,138 @@
+/* ── Entity overview tab (Story Graph right panel) ────────────────────── */
+.detailCard {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 22px 24px;
+  margin-bottom: 14px;
+  animation: qrise 0.25s ease both;
+}
+
+.detailNameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.detailName {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.aliasTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.aliasTag {
+  padding: 3px 10px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.typeBadge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  margin-top: 4px;
+}
+
+.detailDescription {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.55;
+  font-style: italic;
+  margin: 14px 0;
+}
+
+.propertiesGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.propertyTile {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 7px 10px;
+}
+
+.propertyLabel {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin-bottom: 2px;
+}
+
+.propertyValue {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Relevance card */
+.relevanceCard {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px 20px;
+}
+
+.relevanceHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.relevanceTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.relevanceScore {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--accent-live);
+}
+
+.relevanceBar {
+  height: 6px;
+  background: var(--surface-sunken);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.relevanceFill {
+  height: 100%;
+  background: var(--accent-live);
+  border-radius: var(--r-pill);
+  transition: width 0.5s ease;
+}
+
+.relevanceNote {
+  font-size: 11px;
+  color: var(--muted-3);
+  font-style: italic;
+}
