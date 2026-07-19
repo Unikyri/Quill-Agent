@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,13 @@ const (
 	GraphTraversalNodeLimit   = 96
 	GraphTraversalEdgeLimit   = 160
 	GraphTraversalResultLimit = 256
+	// EgoGraphDegree1Limit and EgoGraphDegree2PerSeedLimit shape the
+	// relationship map into a readable ego graph — the focal entity (degree
+	// 0), its most relevant direct neighbors (degree 1), and a small sample
+	// of each neighbor's own connections (degree 2) — ranked by relevance
+	// score rather than an unranked flat dump of everything within two hops.
+	EgoGraphDegree1Limit        = 8
+	EgoGraphDegree2PerSeedLimit = 2
 )
 
 // GraphTraversalLimits describes the applied server-side limits returned with
@@ -459,13 +467,19 @@ func (r *GraphRepo) NHopTraversal(ctx context.Context, graphName, startEntityID 
 	return result.Nodes, result.Edges, err
 }
 
-// BoundedNHopTraversal performs a true one- or two-hop traversal without a
-// variable-length path expansion. It reads direct edges first, then expands
-// only the retained direct neighbors once. Each phase has a one-row lookahead
-// so Truncated is true whenever the result budget clips the neighborhood.
+// BoundedNHopTraversal builds a ranked ego graph around startEntityID rather
+// than an unranked flat dump of everything within two hops: the focal entity
+// (hop 0), its top EgoGraphDegree1Limit direct neighbors by relevance_score
+// (hop 1), and up to EgoGraphDegree2PerSeedLimit further neighbors per
+// degree-1 seed (hop 2). Every returned node's Properties["hop"] records its
+// distance from the focal entity so the renderer can lay it out concentrically.
 func (r *GraphRepo) BoundedNHopTraversal(ctx context.Context, graphName, startEntityID string, hops int) (GraphTraversalResult, error) {
 	result := NewGraphTraversalResult(hops)
 	collector := newBoundedGraphCollector(result.Limits.NodeLimit, result.Limits.EdgeLimit)
+	// addRow rebuilds a node from raw AGE data every time it appears as a
+	// query's reference node, which would clobber a hop tag set mid-loop —
+	// so hops are tracked here and stamped once on the final node slice.
+	hopByID := map[string]int{}
 
 	err := r.withAgeConn(ctx, func(c *pgx.Conn) error {
 		// OPTIONAL MATCH keeps an isolated focal entity in the response while
@@ -476,36 +490,57 @@ func (r *GraphRepo) BoundedNHopTraversal(ctx context.Context, graphName, startEn
 		if err != nil {
 			return fmt.Errorf("direct graph traversal: %w", err)
 		}
+		result.Truncated = directTruncated
 
-		collector.addRows(directRows)
-		result.Truncated = directTruncated || collector.truncated
-		if result.Limits.Hops == 1 || result.Truncated {
+		focal, ok := focalNodeFromRows(directRows, startEntityID)
+		if !ok {
+			// Focal entity isn't in the graph at all (AGE writes are
+			// best-effort during ingestion) — nothing to traverse.
+			return nil
+		}
+		collector.addNode(focal)
+		hopByID[startEntityID] = 0
+
+		degree1 := addRankedNeighbors(collector, rankedDirectNeighbors(directRows, startEntityID), EgoGraphDegree1Limit)
+		for _, id := range degree1 {
+			hopByID[id] = 1
+		}
+		if result.Limits.Hops == 1 || len(degree1) == 0 {
 			return nil
 		}
 
-		seedIDs := retainedDirectNeighborIDs(directRows, startEntityID, collector)
-		if len(seedIDs) == 0 {
-			return nil
+		// Excluding the focal entity and every degree-1 neighbor from each
+		// seed's second-hop query guarantees a degree-2 candidate is never a
+		// node already shown closer to the center.
+		excluded := append([]string{startEntityID}, degree1...)
+		for _, seedID := range degree1 {
+			secondQuery := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (n {entity_id: '%s'})-[r]-(m) WHERE NOT m.entity_id IN %s RETURN n, r, m, type(r) LIMIT %d $$) AS (n agtype, r agtype, m agtype, rel_type agtype)`,
+				quoteGraph(graphName), escapeCypherString(seedID), cypherStringList(excluded), EgoGraphDegree2PerSeedLimit*3)
+			seedRows, _, err := queryGraphRows(ctx, c, secondQuery, EgoGraphDegree2PerSeedLimit*3)
+			if err != nil {
+				return fmt.Errorf("second-hop graph traversal for %s: %w", seedID, err)
+			}
+			degree2 := addRankedNeighbors(collector, rankedDirectNeighbors(seedRows, seedID), EgoGraphDegree2PerSeedLimit)
+			for _, id := range degree2 {
+				if _, exists := hopByID[id]; !exists {
+					hopByID[id] = 2
+				}
+			}
 		}
-
-		remainingResults := result.Limits.ResultLimit - len(directRows)
-		// When the direct phase exactly consumes the result budget, issue a
-		// one-row lookahead for the second phase. That preserves a truthful
-		// truncation signal without adding unbounded work.
-		secondQueryLimit := remainingResults + 1
-		secondQuery := fmt.Sprintf(`SELECT * FROM cypher(%s, $$ MATCH (n)-[r]-(m) WHERE n.entity_id IN %s AND m.entity_id <> '%s' WITH DISTINCT r RETURN startNode(r), r, endNode(r), type(r) LIMIT %d $$) AS (n agtype, r agtype, m agtype, rel_type agtype)`,
-			quoteGraph(graphName), cypherStringList(seedIDs), escapeCypherString(startEntityID), secondQueryLimit)
-		secondRows, secondTruncated, err := queryGraphRows(ctx, c, secondQuery, remainingResults)
-		if err != nil {
-			return fmt.Errorf("second-hop graph traversal: %w", err)
-		}
-
-		collector.addRows(secondRows)
-		result.Truncated = secondTruncated || collector.truncated
 		return nil
 	})
 
 	result.Nodes, result.Edges = collector.nodesAndEdges()
+	for i := range result.Nodes {
+		hop, ok := hopByID[result.Nodes[i].ID]
+		if !ok {
+			continue
+		}
+		if result.Nodes[i].Properties == nil {
+			result.Nodes[i].Properties = map[string]interface{}{}
+		}
+		result.Nodes[i].Properties["hop"] = hop
+	}
 	result.Truncated = result.Truncated || collector.truncated
 	return result, err
 }
@@ -690,25 +725,82 @@ func graphNodeFromRaw(raw *string) (GraphNode, bool) {
 	return GraphNode{ID: id, Properties: map[string]interface{}{"raw": *raw}}, true
 }
 
-func retainedDirectNeighborIDs(rows []graphRow, focalID string, collector *boundedGraphCollector) []string {
-	seedSet := make(map[string]struct{})
+// focalNodeFromRows extracts the focal entity's own node data from
+// OPTIONAL-MATCH rows, present even when it has no relationships at all.
+func focalNodeFromRows(rows []graphRow, focalID string) (GraphNode, bool) {
+	for _, row := range rows {
+		node, ok := graphNodeFromRaw(row.node)
+		if ok && node.ID == focalID {
+			return node, true
+		}
+	}
+	return GraphNode{}, false
+}
+
+// scoredNeighbor groups every row (edge) connecting referenceID to one
+// neighbor, so a multi-edge pair is ranked and added as a single node with
+// all of its connecting edges rather than being split across the ranking.
+type scoredNeighbor struct {
+	node  GraphNode
+	score float64
+	rows  []graphRow
+}
+
+// rankedDirectNeighbors groups rows connecting referenceID to each neighbor,
+// deduped by neighbor ID, and ranks them by relevance_score descending (ties
+// broken by ID for determinism) so the caller can take a bounded top-N slice
+// instead of an arbitrary AGE row order.
+func rankedDirectNeighbors(rows []graphRow, referenceID string) []scoredNeighbor {
+	byID := make(map[string]*scoredNeighbor)
+	order := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row.relationship == nil {
 			continue
 		}
 		neighbor, ok := graphNodeFromRaw(row.target)
-		if !ok || neighbor.ID == focalID || !collector.hasNode(neighbor.ID) {
+		if !ok || neighbor.ID == referenceID {
 			continue
 		}
-		seedSet[neighbor.ID] = struct{}{}
+		if existing, exists := byID[neighbor.ID]; exists {
+			existing.rows = append(existing.rows, row)
+			continue
+		}
+		score, _ := extractNumericProp(*row.target, "relevance_score")
+		byID[neighbor.ID] = &scoredNeighbor{node: neighbor, score: score, rows: []graphRow{row}}
+		order = append(order, neighbor.ID)
 	}
 
-	seedIDs := make([]string, 0, len(seedSet))
-	for id := range seedSet {
-		seedIDs = append(seedIDs, id)
+	neighbors := make([]scoredNeighbor, 0, len(order))
+	for _, id := range order {
+		neighbors = append(neighbors, *byID[id])
 	}
-	sort.Strings(seedIDs)
-	return seedIDs
+	sort.Slice(neighbors, func(i, j int) bool {
+		if neighbors[i].score != neighbors[j].score {
+			return neighbors[i].score > neighbors[j].score
+		}
+		return neighbors[i].node.ID < neighbors[j].node.ID
+	})
+	return neighbors
+}
+
+// addRankedNeighbors adds the top `limit` ranked neighbors and their
+// connecting edges to the collector and returns the added neighbor IDs
+// (used as next-hop seeds; hop tagging happens once on the final result,
+// see BoundedNHopTraversal).
+func addRankedNeighbors(collector *boundedGraphCollector, neighbors []scoredNeighbor, limit int) []string {
+	if limit > len(neighbors) {
+		limit = len(neighbors)
+	}
+	added := make([]string, 0, limit)
+	for _, neighbor := range neighbors[:limit] {
+		for _, row := range neighbor.rows {
+			collector.addRow(row)
+		}
+		if collector.hasNode(neighbor.node.ID) {
+			added = append(added, neighbor.node.ID)
+		}
+	}
+	return added
 }
 
 func cypherStringList(values []string) string {
@@ -745,7 +837,7 @@ func graphRelationshipType(relTypeStr *string) string {
 	return strings.Trim(strings.TrimSpace(*relTypeStr), `"`)
 }
 
-// extractProp pulls a value from a raw agtype string.
+// extractProp pulls a string-typed value from a raw agtype string.
 func extractProp(agtypeStr, key string) string {
 	search := fmt.Sprintf(`"%s": "`, key)
 	idx := strings.Index(agtypeStr, search)
@@ -758,4 +850,28 @@ func extractProp(agtypeStr, key string) string {
 		return ""
 	}
 	return agtypeStr[start : start+end]
+}
+
+// extractNumericProp pulls a numeric (unquoted) value from a raw agtype
+// string, e.g. `"relevance_score": 0.65` (AGE renders numeric properties
+// without quotes, unlike extractProp's string properties).
+func extractNumericProp(agtypeStr, key string) (float64, bool) {
+	search := fmt.Sprintf(`"%s": `, key)
+	idx := strings.Index(agtypeStr, search)
+	if idx < 0 {
+		return 0, false
+	}
+	start := idx + len(search)
+	end := start
+	for end < len(agtypeStr) && (agtypeStr[end] == '.' || agtypeStr[end] == '-' || (agtypeStr[end] >= '0' && agtypeStr[end] <= '9')) {
+		end++
+	}
+	if end == start {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(agtypeStr[start:end], 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }

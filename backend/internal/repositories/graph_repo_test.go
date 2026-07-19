@@ -3,6 +3,8 @@ package repositories
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -297,6 +299,118 @@ func TestGraphRepoBoundedNHopTraversalIncludesSecondHop(t *testing.T) {
 	}
 }
 
+// TestGraphRepoBoundedNHopTraversalBuildsRankedEgoGraph is an end-to-end
+// check against real AGE for the ego-graph shape: only the top
+// EgoGraphDegree1Limit direct neighbors by relevance_score survive at hop 1
+// (a lower-relevance direct neighbor must be excluded), only the top
+// EgoGraphDegree2PerSeedLimit of a hop-1 seed's own neighbors survive at hop
+// 2, and every returned node carries the correct Properties["hop"].
+func TestGraphRepoBoundedNHopTraversalBuildsRankedEgoGraph(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "011")
+	if !testutil.CheckAGE(t, pool) {
+		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
+	}
+
+	ctx := context.Background()
+	repo := NewGraphRepo(pool)
+	graphID := uuid.NewString()
+	if err := repo.CreateGraph(ctx, graphID); err != nil {
+		t.Fatalf("CreateGraph: %v", err)
+	}
+	graphName := "universe_" + graphID
+
+	focalID := uuid.NewString()
+	if err := repo.CreateNode(ctx, graphName, "Character", map[string]interface{}{
+		"entity_id": focalID, "name": "focal", "status": "active", "relevance_score": 1.0,
+	}); err != nil {
+		t.Fatalf("CreateNode(focal): %v", err)
+	}
+
+	// One more direct neighbor than EgoGraphDegree1Limit allows, ranked by a
+	// distinct relevance_score per neighbor so the excluded one is unambiguous.
+	directCount := EgoGraphDegree1Limit + 1
+	directIDs := make([]string, directCount)
+	for i := 0; i < directCount; i++ {
+		id := uuid.NewString()
+		directIDs[i] = id
+		score := 0.9 - float64(i)*0.05 // strictly decreasing: directIDs[0] is most relevant
+		if err := repo.CreateNode(ctx, graphName, "Character", map[string]interface{}{
+			"entity_id": id, "name": fmt.Sprintf("direct-%d", i), "status": "active", "relevance_score": score,
+		}); err != nil {
+			t.Fatalf("CreateNode(direct-%d): %v", i, err)
+		}
+		if err := repo.CreateEdge(ctx, graphName, focalID, id, "KNOWS", nil); err != nil {
+			t.Fatalf("CreateEdge(focal->direct-%d): %v", i, err)
+		}
+	}
+	lowestRankedDirectID := directIDs[directCount-1]
+
+	// Give the single top-ranked direct neighbor more second-hop neighbors
+	// than EgoGraphDegree2PerSeedLimit allows.
+	secondHopCount := EgoGraphDegree2PerSeedLimit + 1
+	secondHopIDs := make([]string, secondHopCount)
+	for i := 0; i < secondHopCount; i++ {
+		id := uuid.NewString()
+		secondHopIDs[i] = id
+		score := 0.5 - float64(i)*0.05
+		if err := repo.CreateNode(ctx, graphName, "Character", map[string]interface{}{
+			"entity_id": id, "name": fmt.Sprintf("second-%d", i), "status": "active", "relevance_score": score,
+		}); err != nil {
+			t.Fatalf("CreateNode(second-%d): %v", i, err)
+		}
+		if err := repo.CreateEdge(ctx, graphName, directIDs[0], id, "KNOWS", nil); err != nil {
+			t.Fatalf("CreateEdge(direct-0->second-%d): %v", i, err)
+		}
+	}
+	lowestRankedSecondHopID := secondHopIDs[secondHopCount-1]
+
+	result, err := repo.BoundedNHopTraversal(ctx, graphName, focalID, 2)
+	if err != nil {
+		t.Fatalf("BoundedNHopTraversal: %v", err)
+	}
+
+	hopByID := make(map[string]interface{}, len(result.Nodes))
+	for _, node := range result.Nodes {
+		hopByID[node.ID] = node.Properties["hop"]
+	}
+
+	if hop, ok := hopByID[focalID]; !ok || hop != 0 {
+		t.Errorf("focal hop = %v (present=%v), want 0", hop, ok)
+	}
+	if hop, ok := hopByID[directIDs[0]]; !ok || hop != 1 {
+		t.Errorf("top-ranked direct neighbor hop = %v (present=%v), want 1", hop, ok)
+	}
+	if _, ok := hopByID[lowestRankedDirectID]; ok {
+		t.Errorf("lowest-ranked direct neighbor (rank %d of %d) should have been excluded by EgoGraphDegree1Limit=%d, but was present with hop=%v",
+			directCount, directCount, EgoGraphDegree1Limit, hopByID[lowestRankedDirectID])
+	}
+	if hop, ok := hopByID[secondHopIDs[0]]; !ok || hop != 2 {
+		t.Errorf("top-ranked second-hop neighbor hop = %v (present=%v), want 2", hop, ok)
+	}
+	if _, ok := hopByID[lowestRankedSecondHopID]; ok {
+		t.Errorf("lowest-ranked second-hop neighbor should have been excluded by EgoGraphDegree2PerSeedLimit=%d, but was present with hop=%v",
+			EgoGraphDegree2PerSeedLimit, hopByID[lowestRankedSecondHopID])
+	}
+
+	wantDegree1 := 0
+	wantDegree2 := 0
+	for _, hop := range hopByID {
+		switch hop {
+		case 1:
+			wantDegree1++
+		case 2:
+			wantDegree2++
+		}
+	}
+	if wantDegree1 != EgoGraphDegree1Limit {
+		t.Errorf("degree-1 node count = %d, want %d", wantDegree1, EgoGraphDegree1Limit)
+	}
+	if wantDegree2 != EgoGraphDegree2PerSeedLimit { // only directIDs[0] was seeded with second-hop neighbors
+		t.Errorf("degree-2 node count = %d, want %d", wantDegree2, EgoGraphDegree2PerSeedLimit)
+	}
+}
+
 func TestBoundedGraphCollectorReportsNodeAndEdgeTruncation(t *testing.T) {
 	t.Run("node limit", func(t *testing.T) {
 		collector := newBoundedGraphCollector(2, 2)
@@ -369,6 +483,105 @@ func graphRowForTest(source, target, edgeID string) graphRow {
 		relationship:     &relationshipRaw,
 		target:           &targetRaw,
 		relationshipType: &relationshipType,
+	}
+}
+
+func graphRowForTestWithScore(source, target, edgeID string, score float64) graphRow {
+	sourceRaw := `{"properties":{"entity_id": "` + source + `"}}`
+	targetRaw := fmt.Sprintf(`{"properties":{"entity_id": "%s", "relevance_score": %v}}`, target, score)
+	relationshipRaw := `{"id":"` + edgeID + `"}`
+	relationshipType := `"KNOWS"`
+	return graphRow{
+		node:             &sourceRaw,
+		relationship:     &relationshipRaw,
+		target:           &targetRaw,
+		relationshipType: &relationshipType,
+	}
+}
+
+func TestExtractNumericProp(t *testing.T) {
+	tests := []struct {
+		raw    string
+		key    string
+		want   float64
+		wantOk bool
+	}{
+		{`{"relevance_score": 0.65, "status": "archived"}`, "relevance_score", 0.65, true},
+		{`{"relevance_score": 1}`, "relevance_score", 1, true},
+		{`{"relevance_score": -0.5}`, "relevance_score", -0.5, true},
+		{`{"status": "active"}`, "relevance_score", 0, false},
+	}
+	for _, tt := range tests {
+		got, ok := extractNumericProp(tt.raw, tt.key)
+		if ok != tt.wantOk || got != tt.want {
+			t.Errorf("extractNumericProp(%q, %q) = (%v, %v), want (%v, %v)", tt.raw, tt.key, got, ok, tt.want, tt.wantOk)
+		}
+	}
+}
+
+func TestRankedDirectNeighborsOrdersByRelevanceDescendingWithIDTiebreak(t *testing.T) {
+	rows := []graphRow{
+		graphRowForTestWithScore("focal", "low", "e1", 0.2),
+		graphRowForTestWithScore("focal", "high", "e2", 0.9),
+		graphRowForTestWithScore("focal", "tie-b", "e3", 0.5),
+		graphRowForTestWithScore("focal", "tie-a", "e4", 0.5),
+	}
+	neighbors := rankedDirectNeighbors(rows, "focal")
+	order := make([]string, len(neighbors))
+	for i, n := range neighbors {
+		order[i] = n.node.ID
+	}
+	want := []string{"high", "tie-a", "tie-b", "low"}
+	if !reflect.DeepEqual(order, want) {
+		t.Errorf("rankedDirectNeighbors order = %v, want %v", order, want)
+	}
+}
+
+func TestRankedDirectNeighborsGroupsMultipleEdgesToSameNeighbor(t *testing.T) {
+	rows := []graphRow{
+		graphRowForTestWithScore("focal", "n1", "e1", 0.5),
+		graphRowForTestWithScore("focal", "n1", "e2", 0.5),
+	}
+	neighbors := rankedDirectNeighbors(rows, "focal")
+	if len(neighbors) != 1 {
+		t.Fatalf("expected 1 grouped neighbor, got %d", len(neighbors))
+	}
+	if len(neighbors[0].rows) != 2 {
+		t.Errorf("expected both edges retained on the grouped neighbor, got %d", len(neighbors[0].rows))
+	}
+}
+
+func TestRankedDirectNeighborsExcludesTheReferenceNodeItself(t *testing.T) {
+	rows := []graphRow{graphRowForTestWithScore("focal", "focal", "e1", 0.9)}
+	neighbors := rankedDirectNeighbors(rows, "focal")
+	if len(neighbors) != 0 {
+		t.Errorf("expected a self-referential row to be excluded, got %v", neighbors)
+	}
+}
+
+func TestAddRankedNeighborsCapsAtLimitAndReturnsAddedIDsInRankOrder(t *testing.T) {
+	collector := newBoundedGraphCollector(0, 0)
+	rows := []graphRow{
+		graphRowForTestWithScore("focal", "c", "e3", 0.7),
+		graphRowForTestWithScore("focal", "a", "e1", 0.9),
+		graphRowForTestWithScore("focal", "b", "e2", 0.8),
+	}
+	neighbors := rankedDirectNeighbors(rows, "focal")
+
+	added := addRankedNeighbors(collector, neighbors, 2)
+	if !reflect.DeepEqual(added, []string{"a", "b"}) {
+		t.Errorf("added = %v, want [a b]", added)
+	}
+
+	nodes, edges := collector.nodesAndEdges()
+	if len(nodes) != 3 { // focal (as the reference node on every added row) + a + b
+		t.Errorf("expected 3 collected nodes (focal, a, b), got %d: %#v", len(nodes), nodes)
+	}
+	if len(edges) != 2 {
+		t.Errorf("expected 2 collected edges, got %d", len(edges))
+	}
+	if collector.hasNode("c") {
+		t.Error("the third-ranked neighbor should not have been added past the limit")
 	}
 }
 

@@ -581,6 +581,60 @@ func TestDashScopeCacheBatchGuardRejectsMarkedMessages(t *testing.T) {
 	}
 }
 
+// TestCompressDashScopeToolResultsSummaryIsAssistantRole guards against a
+// regression where the compressed context was injected as Role: "tool".
+// DashScope's native API rejects a "tool" message that doesn't directly
+// follow an assistant message with tool_calls (InvalidParameter: messages
+// with role "tool" must be a response to a preceding message with
+// "tool_calls") — the compressed head here is just [system, user], so the
+// summary must be an assistant message instead.
+func TestCompressDashScopeToolResultsSummaryIsAssistantRole(t *testing.T) {
+	// Tiny budget forces the 80%-usage threshold to trip immediately.
+	budgetMgr := NewContextBudgetManager(NewTokenizer(), 10, 0)
+
+	msgs := []QwenMessage{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "usr"},
+		{Role: "assistant", ToolCalls: []QwenToolCall{{ID: "1", Function: QwenToolCallFunction{Name: "f"}}}},
+		{Role: "tool", ToolCallID: "1", Content: "result A"},
+		{Role: "assistant", ToolCalls: []QwenToolCall{{ID: "2", Function: QwenToolCallFunction{Name: "f"}}}},
+		{Role: "tool", ToolCallID: "2", Content: "result B"},
+	}
+
+	summarizeCalled := false
+	compressedMsgs, compressed := compressDashScopeToolResults(context.Background(), budgetMgr, msgs, func(_ context.Context, prompt string) (string, error) {
+		summarizeCalled = true
+		if !strings.Contains(prompt, "result A") {
+			t.Errorf("summarize prompt = %q, want it to include the compressed tool result", prompt)
+		}
+		return "summary text", nil
+	})
+	if !compressed {
+		t.Fatal("compressDashScopeToolResults did not attempt compression — test setup did not exceed threshold")
+	}
+	if !summarizeCalled {
+		t.Fatal("summarize callback was not invoked")
+	}
+
+	for i, msg := range compressedMsgs {
+		if msg.Role == "tool" {
+			if i == 0 || compressedMsgs[i-1].Role != "assistant" || len(compressedMsgs[i-1].ToolCalls) == 0 {
+				t.Errorf("compressedMsgs[%d] has role \"tool\" without a preceding assistant tool_calls message", i)
+			}
+		}
+	}
+
+	foundSummary := false
+	for _, msg := range compressedMsgs {
+		if msg.Role == "assistant" && strings.Contains(msg.Content, "summary text") {
+			foundSummary = true
+		}
+	}
+	if !foundSummary {
+		t.Error("compressedMsgs does not contain the summary as an assistant message")
+	}
+}
+
 func TestDashScopeNativeBaseURLNormalizesCompatibleAndAPIV1Forms(t *testing.T) {
 	for input, want := range map[string]string{
 		"https://dashscope-intl.aliyuncs.com":                    "https://dashscope-intl.aliyuncs.com/api/v1",

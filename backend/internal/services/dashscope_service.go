@@ -1190,7 +1190,14 @@ func compressDashScopeToolResults(ctx context.Context, budgetMgr *ContextBudgetM
 	}
 	compressedMsgs := make([]QwenMessage, 0, len(head)+1+len(tail))
 	compressedMsgs = append(compressedMsgs, head...)
-	compressedMsgs = append(compressedMsgs, QwenMessage{Role: "tool", ToolCallID: "compressed-context", Content: summary})
+	// A "tool" role message is only valid as a direct response to a preceding
+	// assistant message with tool_calls (DashScope enforces this strictly,
+	// error InvalidParameter otherwise) — head is just [system, user], so the
+	// summary must be an assistant message, matching QwenService.compressToolResults.
+	compressedMsgs = append(compressedMsgs, QwenMessage{
+		Role:    "assistant",
+		Content: "Prior investigation summary:\n" + summary,
+	})
 	compressedMsgs = append(compressedMsgs, tail...)
 	return compressedMsgs, true
 }
