@@ -33,9 +33,9 @@ function ToWrite({ importMode = false }: { importMode?: boolean }) {
 // pane + tabbed detail); every legacy/entity-scoped Explore link now folds
 // into the consolidated Story Graph map.
 function ToExplore() {
-  const { universeId } = useParams<{ universeId: string }>()
+  const { universeId, entityId } = useParams<{ universeId: string; entityId?: string }>()
   if (!universeId) return <MissingUniverseRedirect />
-  return <Navigate to={explorePath(universeId, 'map')} replace />
+  return <Navigate to={explorePath(universeId, 'map', entityId)} replace />
 }
 
 function ToReview({ view }: { view: ReviewView }) {

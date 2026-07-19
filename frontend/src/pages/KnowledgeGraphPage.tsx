@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Network, RotateCcw } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import GraphCanvas from '../components/knowledge-graph/GraphCanvas'
 import GraphControls from '../components/knowledge-graph/GraphControls'
 import TimelineSlider from '../components/knowledge-graph/TimelineSlider'
@@ -45,6 +45,10 @@ export default function KnowledgeGraphPage() {
   const { universeId } = useParams<{ universeId: string }>()
   const { universe } = useContext(UniverseContext)
   const navigate = useNavigate()
+  // Deep-link target entity, e.g. from a legacy `/entity/:id` redirect —
+  // read once on mount so a later in-page focusNode() doesn't fight it.
+  const [searchParams] = useSearchParams()
+  const targetEntityIdRef = useRef(searchParams.get('entity') ?? undefined)
   const fetchGraph = useGraphStore((state) => state.fetchGraph)
   const refresh = useGraphStore((state) => state.refresh)
   const resetFocus = useGraphStore((state) => state.resetFocus)
@@ -85,7 +89,7 @@ export default function KnowledgeGraphPage() {
   const detailEntityId = selectedNodeId ?? focalNodeId ?? null
 
   useEffect(() => {
-    if (universeId) void fetchGraph(universeId)
+    if (universeId) void fetchGraph(universeId, targetEntityIdRef.current)
   }, [fetchGraph, universeId])
 
   useEffect(() => {
@@ -177,7 +181,7 @@ export default function KnowledgeGraphPage() {
       <PageStatus
         loading={loading}
         error={error}
-        onRetry={() => { if (universeId) void fetchGraph(universeId) }}
+        onRetry={() => { if (universeId) void fetchGraph(universeId, targetEntityIdRef.current) }}
       />
     )
   }

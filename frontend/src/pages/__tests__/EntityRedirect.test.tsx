@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import EntityRedirect from '../EntityRedirect'
 
 const mockGetEntity = vi.fn()
@@ -9,7 +9,13 @@ vi.mock('../../lib/api', () => ({
 }))
 
 function Target() {
-  return <div>Canonical explore screen</div>
+  const location = useLocation()
+  return (
+    <div>
+      Canonical explore screen
+      <output data-testid="target-location">{location.pathname}{location.search}</output>
+    </div>
+  )
 }
 
 function Dashboard() {
@@ -37,6 +43,15 @@ describe('EntityRedirect', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Canonical explore screen')).toBeInTheDocument()
+    })
+  })
+
+  it('preserves the resolved entity id as a target query param on the map, not just the universe', async () => {
+    mockGetEntity.mockResolvedValue({ entity: { id: 'ent-1', universe_id: 'uni-2' } })
+    renderRedirect('ent-1')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('target-location')).toHaveTextContent('/universe/uni-2/explore/map?entity=ent-1')
     })
   })
 

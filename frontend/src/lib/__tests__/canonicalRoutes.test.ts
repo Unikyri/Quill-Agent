@@ -13,6 +13,12 @@ describe('canonical Sprint 7 routes', () => {
     expect(explorePath('uni-1', 'timeline')).toBe('/universe/uni-1/explore/timeline')
   })
 
+  it('carries a target entity id through to the map as a query param', () => {
+    expect(explorePath('uni-1', 'map', 'ent-1')).toBe('/universe/uni-1/explore/map?entity=ent-1')
+    // No entityId provided → no query param (plain auto-focus entry point).
+    expect(explorePath('uni-1', 'map', undefined)).toBe('/universe/uni-1/explore/map')
+  })
+
   it('builds Memory and Review destinations', () => {
     expect(memoryPath('uni-1')).toBe('/universe/uni-1/memory')
     expect(reviewPath('uni-1', 'issues')).toBe('/universe/uni-1/review/issues')

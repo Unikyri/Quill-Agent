@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import EntityOverviewTab from '../EntityOverviewTab'
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => { resolve = res })
+  return { promise, resolve }
+}
 
 vi.mock('../EntityOverviewTab.module.css', () => ({ default: new Proxy({}, { get: (_, key) => key }) }))
 
@@ -83,5 +89,25 @@ describe('EntityOverviewTab', () => {
     view.rerender(<EntityOverviewTab entityId="e2" />)
     expect(await screen.findByText('The Keep')).toBeInTheDocument()
     expect(mockGetEntity).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the later entity, not a flash of the earlier one, when the first fetch resolves after the second', async () => {
+    const first = deferred<{ entity: { id: string; universe_id: string; type: string; name: string; status: string; relevance_score: number } }>()
+    const second = deferred<{ entity: { id: string; universe_id: string; type: string; name: string; status: string; relevance_score: number } }>()
+    mockGetEntity.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const view = render(<EntityOverviewTab entityId="e1" />)
+    view.rerender(<EntityOverviewTab entityId="e2" />)
+
+    // The later request (e2) resolves first — simulating out-of-order network responses.
+    second.resolve({ entity: { id: 'e2', universe_id: 'u1', type: 'place', name: 'The Keep', status: 'active', relevance_score: 0.2 } })
+    await screen.findByText('The Keep')
+
+    // The stale, earlier request (e1) resolves after — its result must be discarded.
+    first.resolve({ entity: { id: 'e1', universe_id: 'u1', type: 'character', name: 'Alice', status: 'active', relevance_score: 0.5 } })
+    await waitFor(() => expect(mockGetEntity).toHaveBeenCalledTimes(2))
+
+    expect(screen.getByText('The Keep')).toBeInTheDocument()
+    expect(screen.queryByText('Alice')).not.toBeInTheDocument()
   })
 })

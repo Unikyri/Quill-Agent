@@ -29,7 +29,7 @@ interface GraphState {
   // slider when a story event is selected, so "filter by event" doesn't
   // require an extra click, only whichever entities are already on the map.
   eventHighlightIds: string[] | null
-  fetchGraph: (universeId: string) => Promise<void>
+  fetchGraph: (universeId: string, targetEntityId?: string) => Promise<void>
   refresh: () => Promise<void>
   focusNode: (id: string) => Promise<void>
   resetFocus: () => Promise<void>
@@ -76,7 +76,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   breadcrumb: [],
   eventHighlightIds: null,
 
-  fetchGraph: async (universeId) => {
+  fetchGraph: async (universeId, targetEntityId) => {
     const requestVersion = get().requestVersion + 1
     set({
       loading: true,
@@ -93,20 +93,28 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     })
 
     try {
-      // Land on an ego graph centered on the universe's most relevant
-      // entity — a curated, ranked neighborhood reads as an actual graph.
-      // An unranked full-universe dump (every node, no fan-out shaping)
-      // renders as disconnected squares once there are more than a few
-      // entities, so it is not used as the default view.
-      let { entities } = await api.listEntities(universeId, { limit: '1', status: 'active' })
-      if (!isCurrentRequest(get, requestVersion, universeId)) return
+      // A caller (e.g. a legacy entity deep link) can name the entity to
+      // focus directly — skip the "most relevant entity" auto-select below
+      // entirely so a deep link never silently lands on the wrong entity.
+      let focalNodeId = targetEntityId
 
-      if (entities.length === 0) {
-        ({ entities } = await api.listEntities(universeId, { limit: '1', status: 'archived' }))
+      if (!focalNodeId) {
+        // Land on an ego graph centered on the universe's most relevant
+        // entity — a curated, ranked neighborhood reads as an actual graph.
+        // An unranked full-universe dump (every node, no fan-out shaping)
+        // renders as disconnected squares once there are more than a few
+        // entities, so it is not used as the default view.
+        let { entities } = await api.listEntities(universeId, { limit: '1', status: 'active' })
         if (!isCurrentRequest(get, requestVersion, universeId)) return
+
+        if (entities.length === 0) {
+          ({ entities } = await api.listEntities(universeId, { limit: '1', status: 'archived' }))
+          if (!isCurrentRequest(get, requestVersion, universeId)) return
+        }
+
+        focalNodeId = entities[0]?.id
       }
 
-      const focalNodeId = entities[0]?.id
       if (!focalNodeId) {
         if (isCurrentRequest(get, requestVersion, universeId)) {
           set({ nodes: [], edges: [], truncated: false, limits: null, focalNodeId: null, loading: false })

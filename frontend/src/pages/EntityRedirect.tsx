@@ -27,7 +27,7 @@ export default function EntityRedirect() {
       .getEntity(entityId)
       .then(({ entity }) => {
         if (cancelled) return
-        setTarget(explorePath(entity.universe_id, 'map'))
+        setTarget(explorePath(entity.universe_id, 'map', entity.id))
       })
       .catch(() => {
         if (!cancelled) setError('Could not open this entity. It may no longer exist. Retry to try again.')

@@ -14,8 +14,9 @@ export function writeImportPath(universeId: string): string {
   return `${writePath(universeId)}?panel=import`
 }
 
-export function explorePath(universeId: string, view: ExploreView): string {
-  return `${universeBase(universeId)}/explore/${view}`
+export function explorePath(universeId: string, view: ExploreView, entityId?: string): string {
+  const base = `${universeBase(universeId)}/explore/${view}`
+  return entityId ? `${base}?entity=${encodeURIComponent(entityId)}` : base
 }
 
 export function memoryPath(universeId: string): string {

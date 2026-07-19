@@ -102,10 +102,10 @@ function aliceNode() {
   return { id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }
 }
 
-function renderPage() {
+function renderPage(initialEntry = '/universe/uni-1/explore/map') {
   return render(
     <UniverseContext.Provider value={defaultContext}>
-      <MemoryRouter initialEntries={['/universe/uni-1/explore/map']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/universe/:universeId/explore/map" element={<KnowledgeGraphPage />} />
         </Routes>
@@ -230,6 +230,36 @@ describe('KnowledgeGraphPage', () => {
     // refresh() keeps the current focal neighborhood fresh.
     await waitFor(() => {
       expect(mockGetEntityNeighbors).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // ── Deep-link entity targeting (restores the contract EntityRedirect/legacy
+  // routes rely on: a specific ?entity=<id> must be selected, not whichever
+  // entity fetchGraph's default auto-focus would have picked). ──────────────
+  describe('deep-linked target entity', () => {
+    function bobNode() {
+      return { id: 'n2', properties: { raw: '{"id":2,"label":"character","properties":{"entity_id":"n2","name":"Bob"}}' } }
+    }
+
+    it('selects the entity named by the ?entity= query param instead of auto-focusing the most relevant one', async () => {
+      mockListEntities.mockResolvedValue({
+        entities: [
+          { id: 'n1', name: 'Alice', type: 'character' },
+          { id: 'n2', name: 'Bob', type: 'character' },
+        ],
+        counts_by_type: { ...emptyCounts, character: 2 },
+        pagination: { total: 2 },
+      })
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [bobNode()], edges: [], truncated: false, limits: graphLimits })
+
+      renderPage('/universe/uni-1/explore/map?entity=n2')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('entity-overview-tab')).toHaveTextContent('Overview for n2')
+      })
+      // getEntityNeighbors must be called with the targeted entity directly —
+      // not preceded by the auto-focus "most relevant entity" lookup.
+      expect(mockGetEntityNeighbors).toHaveBeenCalledWith('n2', 'uni-1', 2)
     })
   })
 

@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import RelationshipsTab from '../RelationshipsTab'
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => { resolve = res })
+  return { promise, resolve }
+}
 
 vi.mock('../RelationshipsTab.module.css', () => ({ default: new Proxy({}, { get: (_, key) => key }) }))
 
@@ -107,5 +113,39 @@ describe('RelationshipsTab', () => {
     view.rerender(<RelationshipsTab entityId="e3" universeId="u1" />)
     expect(await screen.findByText('No relationships are recorded for this entity yet.')).toBeInTheDocument()
     expect(mockGetEntityNeighbors).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the later entity, not a flash of the earlier one, when the first fetch resolves after the second', async () => {
+    type Neighborhood = { nodes: unknown[]; edges: unknown[]; truncated: boolean; limits: typeof limits }
+    const first = deferred<Neighborhood>()
+    const second = deferred<Neighborhood>()
+    mockGetEntityNeighbors.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const view = render(<RelationshipsTab entityId="e1" universeId="u1" />)
+    view.rerender(<RelationshipsTab entityId="e3" universeId="u1" />)
+
+    // The later request (e3) resolves first — simulating out-of-order network responses.
+    second.resolve({
+      nodes: [{ id: 'n3', properties: { raw: vertexRaw('e3', 'Cara', 'character') } }],
+      edges: [],
+      truncated: false,
+      limits,
+    })
+    await screen.findByText('No relationships are recorded for this entity yet.')
+
+    // The stale, earlier request (e1) resolves after — its result must be discarded.
+    first.resolve({
+      nodes: [
+        { id: 'n1', properties: { raw: vertexRaw('e1', 'Alice', 'character') } },
+        { id: 'n2', properties: { raw: vertexRaw('e2', 'Bob', 'character') } },
+      ],
+      edges: [{ id: 'edge1', source: 'e1', target: 'e2', type: 'ally_of' }],
+      truncated: false,
+      limits,
+    })
+    await waitFor(() => expect(mockGetEntityNeighbors).toHaveBeenCalledTimes(2))
+
+    expect(screen.getByText('No relationships are recorded for this entity yet.')).toBeInTheDocument()
+    expect(screen.queryByText('Bob')).not.toBeInTheDocument()
   })
 })

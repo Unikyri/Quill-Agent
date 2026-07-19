@@ -17,6 +17,11 @@ interface RelevanceHistoryTabProps {
 // memory-status keys its own `entities[].id` by (both are the Postgres
 // entities table's primary key — confirmed via entity_service.go always
 // setting the AGE vertex's `entity_id` property to `entity.ID.String()`).
+// ponytail: known staleness gap — POST /universes/:id/decay does not emit any
+// WS message (only analysis_service.go pushes graph_updated), so this tab only
+// refreshes on mount/retry, not live after a decay sweep run elsewhere. Fixing
+// that needs new backend WS plumbing (decay handler + relevance_service.go),
+// not a frontend-only change, so it's deliberately out of scope here.
 export default function RelevanceHistoryTab({ entityId, universeId }: RelevanceHistoryTabProps) {
   const [entities, setEntities] = useState<MemoryStatusEntity[] | null>(null)
   const [loading, setLoading] = useState(true)

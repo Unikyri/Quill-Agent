@@ -170,6 +170,20 @@ describe('graphStore', () => {
       expect(getStore().limits).toEqual(graphLimits)
     })
 
+    it('focuses a specific target entity id instead of auto-selecting the most relevant one', async () => {
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [graphNode('n2', 'Targeted')], edges: [], truncated: false, limits: graphLimits })
+
+      await getStore().fetchGraph('uni-1', 'n2')
+
+      // The "most relevant entity" lookup must be skipped entirely — a specific
+      // target was requested, so there's nothing to auto-select.
+      expect(mockListEntities).not.toHaveBeenCalled()
+      expect(mockGetEntityNeighbors).toHaveBeenCalledWith('n2', 'uni-1', 2)
+      expect(getStore().focalNodeId).toBe('n2')
+      expect(getStore().selectedNodeId).toBe('n2')
+      expect(getStore().nodes[0].data.label).toBe('Targeted')
+    })
+
     it('ignores a stale universe response after a newer graph fetch finishes', async () => {
       const firstNeighborhood = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[]; truncated: boolean; limits: typeof graphLimits }>()
       const secondNeighborhood = deferred<{ nodes: ReturnType<typeof graphNode>[]; edges: never[]; truncated: boolean; limits: typeof graphLimits }>()
