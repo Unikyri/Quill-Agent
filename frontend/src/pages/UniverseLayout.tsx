@@ -255,8 +255,6 @@ export default function UniverseLayout() {
   const [savingGenres, setSavingGenres] = useState(false)
   const switcherRef = useRef<HTMLDivElement>(null)
   const accountRef = useRef<HTMLDivElement>(null)
-  const lastWsStatus = useRef<WSStatus | null>(null)
-  const lastWsError = useRef<string | null>(null)
   const universeLoadRequestId = useRef(0)
   const currentUniverseId = useRef(universeId)
   currentUniverseId.current = universeId
@@ -356,23 +354,6 @@ export default function UniverseLayout() {
       retry: retryUniverseLoad,
     })
   }, [error, publish, retryUniverseLoad])
-
-  useEffect(() => {
-    const previous = lastWsStatus.current
-    lastWsStatus.current = wsStatus
-    if (previous === null || previous === wsStatus) return
-    if (wsStatus === 'open') {
-      publish({ scope: 'connection', status: 'completed', message: 'Live analysis connected.' })
-    } else if (previous === 'open' && (wsStatus === 'closed' || wsStatus === 'reconnecting')) {
-      publish({ scope: 'connection', status: 'offline', message: 'Live analysis connection was interrupted.' })
-    }
-  }, [publish, wsStatus])
-
-  useEffect(() => {
-    if (!lastError || lastWsError.current === lastError) return
-    lastWsError.current = lastError
-    publish({ scope: 'connection', status: 'failed', message: `Live analysis error: ${lastError}` })
-  }, [lastError, publish])
 
   useEffect(() => {
     const closeMenus = (event: MouseEvent) => {

@@ -465,6 +465,19 @@ func (s *AnalysisService) processJob(ctx context.Context, job analysisJob) (*Ana
 				queryEmbedding = nil
 			}
 		}
+		if queryEmbedding != nil {
+			// ponytail: paragraph index 0 — live analysis has no real integer
+			// index (only job.ParagraphRef, the TipTap node id) and doesn't
+			// populate entity_mentions either, so nothing derives graph seeds
+			// from paragraph_index here; vector search ranks by embedding
+			// distance only, so 0 is safe. Persisting this is what the vector
+			// recall pipeline needs — it was computed to query recall but
+			// never saved, leaving paragraph_embeddings empty for anything
+			// not imported via ingestion.
+			if err := s.memorySvc.SaveParagraphEmbedding(ctx, job.ChapterID, 0, job.ParagraphRef, job.Text, queryEmbedding); err != nil {
+				log.Printf("[analysis] save paragraph embedding: %v", err)
+			}
+		}
 		items, err := s.memorySvc.RecallWithQuery(ctx, job.UniverseID, queryEmbedding, queryText, 5)
 		if err != nil {
 			return nil, fmt.Errorf("contextual recall: %w", err)

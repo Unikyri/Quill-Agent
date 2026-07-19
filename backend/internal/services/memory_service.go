@@ -162,6 +162,14 @@ func (s *MemoryService) SetReranker(r Reranker) {
 	s.reranker = r
 }
 
+// SaveParagraphEmbedding persists a paragraph embedding so the vector recall
+// pipeline has data to search over. Thin pass-through to vectorRepo so
+// analysis_service.go doesn't need its own VectorRepo dependency wired
+// through main.go.
+func (s *MemoryService) SaveParagraphEmbedding(ctx context.Context, chapterID uuid.UUID, paragraphIndex int, nodeID, content string, embedding []float32) error {
+	return s.vectorRepo.SaveParagraphEmbedding(ctx, chapterID, paragraphIndex, nodeID, content, embedding)
+}
+
 // Recall is the caller-compatible entrypoint kept for existing callers
 // (ws/hub.go, handlers/graph.go, analysis_service.go) that don't yet pass a
 // queryText. It delegates to RecallWithQuery with an empty queryText, which

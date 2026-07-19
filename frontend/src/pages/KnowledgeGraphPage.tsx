@@ -8,6 +8,7 @@ import EntityOverviewTab from '../components/knowledge-graph/EntityOverviewTab'
 import RelationshipsTab from '../components/knowledge-graph/RelationshipsTab'
 import MentionsTab from '../components/knowledge-graph/MentionsTab'
 import RelevanceHistoryTab from '../components/knowledge-graph/RelevanceHistoryTab'
+import EmptyState from '../components/shared/EmptyState'
 import PageStatus from '../components/shared/PageStatus'
 import { UniverseContext } from '../contexts/UniverseContext'
 import { writeImportPath } from '../lib/canonicalRoutes'
@@ -306,14 +307,16 @@ export default function KnowledgeGraphPage() {
         )}
 
         {nodes.length === 0 ? (
-          <div className={styles.emptyState}>
-            <Network size={32} aria-hidden="true" />
-            <h2>No relationship map yet</h2>
-            <p>Import a manuscript or keep writing to let Quill extract story entities and their relationships.</p>
-            <button type="button" className={styles.importButton} onClick={() => universeId && navigate(writeImportPath(universeId))}>
-              Go to import
-            </button>
-          </div>
+          <EmptyState
+            icon={<Network size={24} aria-hidden="true" />}
+            title="No relationship map yet"
+            detail="Import a manuscript or keep writing to let Quill extract story entities and their relationships."
+            action={
+              <button type="button" className={styles.importButton} onClick={() => universeId && navigate(writeImportPath(universeId))}>
+                Go to import
+              </button>
+            }
+          />
         ) : (
           <>
             <GraphControls />

@@ -20,13 +20,13 @@ const style: StylesheetJson = [
       shape: 'round-rectangle',
       width: 'label',
       height: 'label',
-      padding: '14px',
+      padding: '18px',
       'background-color': '#fffefa',
-      'border-width': 2,
+      'border-width': 2.5,
       'border-color': '#52605b',
       color: '#192321',
       'font-family': 'Spline Sans, system-ui, sans-serif',
-      'font-size': 12,
+      'font-size': 13,
       'font-weight': 600,
       'text-wrap': 'wrap',
       'text-max-width': '150px',
@@ -91,9 +91,9 @@ const style: StylesheetJson = [
   {
     selector: 'edge',
     style: {
-      width: 1.5,
-      'line-color': '#9ca7a2',
-      'target-arrow-color': '#9ca7a2',
+      width: 2,
+      'line-color': '#7c8b85',
+      'target-arrow-color': '#7c8b85',
       'target-arrow-shape': 'triangle',
       'curve-style': 'bezier',
       label: '',
@@ -108,7 +108,7 @@ const style: StylesheetJson = [
   {
     selector: 'edge[edgeTier = 0]',
     style: {
-      width: 2.5,
+      width: 3,
       'line-color': '#155e58',
       'target-arrow-color': '#155e58',
     },
@@ -116,7 +116,7 @@ const style: StylesheetJson = [
   {
     selector: 'edge[edgeTier = 1]',
     style: {
-      width: 1.5,
+      width: 2,
       'line-color': '#7c8b85',
       'target-arrow-color': '#7c8b85',
     },
@@ -124,7 +124,7 @@ const style: StylesheetJson = [
   {
     selector: 'edge[edgeTier = 2]',
     style: {
-      width: 1,
+      width: 1.5,
       'line-color': '#b7bdb8',
       'target-arrow-color': '#b7bdb8',
       'line-style': 'dashed',
@@ -208,6 +208,8 @@ export default function GraphCanvas() {
       style,
       elements: [],
       boxSelectionEnabled: false,
+      minZoom: 0.2,
+      maxZoom: 2,
     })
     cyRef.current = cy
 
@@ -272,8 +274,13 @@ export default function GraphCanvas() {
           gravity: 0.25,
           padding: 48,
         } as LayoutOptions
-    cy.layout(layout).run()
-    cy.fit(cy.elements(), 48)
+    // Fit after the layout finishes moving nodes, not synchronously right
+    // after starting it — firing cy.fit() immediately fits to the pre/mid
+    // animation positions, not the finished layout (layoutstop fires either
+    // way, animated or not).
+    const run = cy.layout(layout)
+    run.one('layoutstop', () => cy.fit(cy.elements(), 40))
+    run.run()
   }, [elements])
 
   useEffect(() => {

@@ -11,7 +11,10 @@ const { mockCore, mockCytoscape } = vi.hoisted(() => {
     nodes: vi.fn(() => ({ forEach: vi.fn(), map: vi.fn(() => []) })),
     edges: vi.fn(() => ({ forEach: vi.fn() })),
     fit: vi.fn(),
-    layout: vi.fn(() => ({ run: vi.fn() })),
+    // `one('layoutstop', cb)` fires synchronously here (matching a
+    // non-animated/reduced-motion layout in real Cytoscape) so GraphCanvas's
+    // fit-on-layoutstop wiring can be asserted without waiting on animation.
+    layout: vi.fn(() => ({ run: vi.fn(), one: vi.fn((_event: string, cb: () => void) => cb()) })),
     on: vi.fn(),
     resize: vi.fn(),
     $id: vi.fn(() => ({ select: vi.fn() })),
@@ -69,6 +72,15 @@ describe('GraphCanvas', () => {
     await waitFor(() => {
       expect(latestAddedNodeIds()).toEqual(['active', 'archived'])
     })
+  })
+
+  it('fits the viewport only after the layout reports layoutstop, not synchronously', async () => {
+    render(<GraphCanvas />)
+
+    await waitFor(() => expect(mockCore.layout).toHaveBeenCalled())
+    const layoutCall = mockCore.layout.mock.results[mockCore.layout.mock.results.length - 1].value
+    expect(layoutCall.one).toHaveBeenCalledWith('layoutstop', expect.any(Function))
+    await waitFor(() => expect(mockCore.fit).toHaveBeenCalledWith(expect.anything(), 40))
   })
 
   it('still renders using the default render caps when graph data has no traversal bounds (full-graph view)', async () => {

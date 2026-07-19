@@ -21,17 +21,24 @@ var (
 	ErrDemoUniverseNotFound       = errors.New("demo universe not found")
 )
 
+// demoDefaultSkills are activated on every freshly-cloned demo universe so
+// "Ask for a craft review" works on the golden path instead of surfacing
+// "No active skill selected" on a universe nobody manually configured.
+var demoDefaultSkills = []string{"line-editor", "worldbuilding-and-exposition"}
+
 type DemoService struct {
 	pool         *pgxpool.Pool
 	universeRepo *repositories.UniverseRepo
 	graphRepo    *repositories.GraphRepo
+	skillRepo    *repositories.SkillRepo
 }
 
-func NewDemoService(pool *pgxpool.Pool, universeRepo *repositories.UniverseRepo, graphRepo *repositories.GraphRepo) *DemoService {
+func NewDemoService(pool *pgxpool.Pool, universeRepo *repositories.UniverseRepo, graphRepo *repositories.GraphRepo, skillRepo *repositories.SkillRepo) *DemoService {
 	return &DemoService{
 		pool:         pool,
 		universeRepo: universeRepo,
 		graphRepo:    graphRepo,
+		skillRepo:    skillRepo,
 	}
 }
 
@@ -512,6 +519,17 @@ func (s *DemoService) CloneUniverse(ctx context.Context, userID uuid.UUID, sessi
 	}
 	if skipped > 0 {
 		log.Printf("[demo] cloneGraph skipped %d unmapped edges (template drift)", skipped)
+	}
+
+	// 11. Activate default craft skills so review works out of the box.
+	if s.skillRepo != nil {
+		newUUID, err := uuid.Parse(newID)
+		if err != nil {
+			return "", fmt.Errorf("parse new universe id: %w", err)
+		}
+		if err := s.skillRepo.ReplaceTx(ctx, tx, newUUID, demoDefaultSkills); err != nil {
+			return "", fmt.Errorf("activate demo skills: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

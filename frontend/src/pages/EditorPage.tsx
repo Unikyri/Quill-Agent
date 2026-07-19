@@ -63,7 +63,7 @@ export default function EditorPage() {
   }
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { publish, update } = useFeedback()
+  const { publish, update, dismiss } = useFeedback()
   const {
     content,
     wordCount,
@@ -116,6 +116,9 @@ export default function EditorPage() {
   const [knownEntitiesError, setKnownEntitiesError] = useState<string | null>(null)
   const [chaptersError, setChaptersError] = useState<string | null>(null)
   const previousSaveStatus = useRef<string | null>(null)
+  const lastWsStatus = useRef<typeof wsStatus | null>(null)
+  const lastWsConnectionError = useRef<string | null>(null)
+  const connectionToastId = useRef<string | null>(null)
   const craftRequestId = useRef<string | null>(null)
   const craftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const terminalCraftRequestIds = useRef(new Set<string>())
@@ -129,6 +132,31 @@ export default function EditorPage() {
   }, [])
 
   useWS()
+
+  // Connection status toasts are scoped to the Editor screen only (the
+  // header status pill in UniverseLayout is the always-on indicator for
+  // every universe screen); dismiss on unmount so a still-open toast never
+  // leaks into the next screen navigated to.
+  useEffect(() => {
+    const previous = lastWsStatus.current
+    lastWsStatus.current = wsStatus
+    if (previous === null || previous === wsStatus) return
+    if (wsStatus === 'open') {
+      connectionToastId.current = publish({ scope: 'connection', status: 'completed', message: 'Live analysis connected.' })
+    } else if (previous === 'open' && (wsStatus === 'closed' || wsStatus === 'reconnecting')) {
+      connectionToastId.current = publish({ scope: 'connection', status: 'offline', message: 'Live analysis connection was interrupted.' })
+    }
+  }, [publish, wsStatus])
+
+  useEffect(() => {
+    if (!wsError || lastWsConnectionError.current === wsError) return
+    lastWsConnectionError.current = wsError
+    connectionToastId.current = publish({ scope: 'connection', status: 'failed', message: `Live analysis error: ${wsError}` })
+  }, [publish, wsError])
+
+  useEffect(() => () => {
+    if (connectionToastId.current) dismiss(connectionToastId.current)
+  }, [dismiss])
 
   useEffect(() => {
     if (!initialPanelState.preferenceError) return

@@ -440,7 +440,7 @@ func (r *EntityRepo) CreateMention(ctx context.Context, tx pgx.Tx, m *models.Ent
 
 func (r *EntityRepo) GetMentionsByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]models.EntityMention, error) {
 	query := `
-		SELECT id, entity_id, chapter_id, paragraph_index, character_offset, paragraph_node_id, context_snippet, mention_type, created_at
+		SELECT id, entity_id, chapter_id, paragraph_index, character_offset, COALESCE(paragraph_node_id, ''), context_snippet, mention_type, created_at
 		FROM entity_mentions WHERE entity_id = $1
 		ORDER BY created_at DESC
 		LIMIT $2

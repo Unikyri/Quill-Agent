@@ -54,7 +54,7 @@ func TestDemoServiceRejectsBearerTokenAsSessionID(t *testing.T) {
 
 func TestCloneUniverseDeepCopy(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -62,7 +62,7 @@ func TestCloneUniverseDeepCopy(t *testing.T) {
 
 	universeRepo := repositories.NewUniverseRepo(pool)
 	graphRepo := repositories.NewGraphRepo(pool)
-	svc := NewDemoService(pool, universeRepo, graphRepo)
+	svc := NewDemoService(pool, universeRepo, graphRepo, repositories.NewSkillRepo(pool))
 
 	sessionID := uuid.NewString()
 
@@ -159,7 +159,7 @@ func TestCloneUniverseDeepCopy(t *testing.T) {
 
 func TestCloneUniverseIdempotent(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -167,7 +167,7 @@ func TestCloneUniverseIdempotent(t *testing.T) {
 
 	universeRepo := repositories.NewUniverseRepo(pool)
 	graphRepo := repositories.NewGraphRepo(pool)
-	svc := NewDemoService(pool, universeRepo, graphRepo)
+	svc := NewDemoService(pool, universeRepo, graphRepo, repositories.NewSkillRepo(pool))
 
 	sessionID := uuid.NewString()
 
@@ -199,14 +199,14 @@ func TestCloneUniverseIdempotent(t *testing.T) {
 
 func TestCloneUniverseAssignsInitiatingOwnerAndScopesSharedSession(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
 	ctx := context.Background()
 
 	universeRepo := repositories.NewUniverseRepo(pool)
-	svc := NewDemoService(pool, universeRepo, repositories.NewGraphRepo(pool))
+	svc := NewDemoService(pool, universeRepo, repositories.NewGraphRepo(pool), repositories.NewSkillRepo(pool))
 	ownerA := svcCreateTestUser(t, ctx, pool)
 	ownerB := svcCreateTestUser(t, ctx, pool)
 	ownerC := svcCreateTestUser(t, ctx, pool)
@@ -275,7 +275,7 @@ func TestCloneUniverseAssignsInitiatingOwnerAndScopesSharedSession(t *testing.T)
 
 func TestCloneUniverseUUIDRemapNoOrphans(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -283,7 +283,7 @@ func TestCloneUniverseUUIDRemapNoOrphans(t *testing.T) {
 
 	universeRepo := repositories.NewUniverseRepo(pool)
 	graphRepo := repositories.NewGraphRepo(pool)
-	svc := NewDemoService(pool, universeRepo, graphRepo)
+	svc := NewDemoService(pool, universeRepo, graphRepo, repositories.NewSkillRepo(pool))
 
 	newID, err := svc.CloneUniverse(ctx, demoTemplateUserID, uuid.NewString())
 	if err != nil {
@@ -337,7 +337,7 @@ func TestCloneUniverseUUIDRemapNoOrphans(t *testing.T) {
 
 func TestCloneUniverseEmbeddingCopy(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -345,7 +345,7 @@ func TestCloneUniverseEmbeddingCopy(t *testing.T) {
 
 	universeRepo := repositories.NewUniverseRepo(pool)
 	graphRepo := repositories.NewGraphRepo(pool)
-	svc := NewDemoService(pool, universeRepo, graphRepo)
+	svc := NewDemoService(pool, universeRepo, graphRepo, repositories.NewSkillRepo(pool))
 
 	newID, err := svc.CloneUniverse(ctx, demoTemplateUserID, uuid.NewString())
 	if err != nil {
@@ -396,7 +396,7 @@ func TestCloneUniverseEmbeddingCopy(t *testing.T) {
 
 func TestResetUniverse(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -404,7 +404,7 @@ func TestResetUniverse(t *testing.T) {
 
 	universeRepo := repositories.NewUniverseRepo(pool)
 	graphRepo := repositories.NewGraphRepo(pool)
-	svc := NewDemoService(pool, universeRepo, graphRepo)
+	svc := NewDemoService(pool, universeRepo, graphRepo, repositories.NewSkillRepo(pool))
 
 	sessionID := uuid.NewString()
 
@@ -455,7 +455,7 @@ func TestResetUniverse(t *testing.T) {
 
 func TestResetUniversePreservesPriorCloneOnReplacementFailureAndCleansOldGraph(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -463,7 +463,7 @@ func TestResetUniversePreservesPriorCloneOnReplacementFailureAndCleansOldGraph(t
 
 	universeRepo := repositories.NewUniverseRepo(pool)
 	graphRepo := repositories.NewGraphRepo(pool)
-	svc := NewDemoService(pool, universeRepo, graphRepo)
+	svc := NewDemoService(pool, universeRepo, graphRepo, repositories.NewSkillRepo(pool))
 	sessionID := uuid.NewString()
 
 	firstID, err := svc.CloneUniverse(ctx, demoTemplateUserID, sessionID)
@@ -532,7 +532,7 @@ func TestResetUniversePreservesPriorCloneOnReplacementFailureAndCleansOldGraph(t
 
 func TestCloneGraph(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "021")
+	testutil.RunMigrationsUpTo(t, pool, "025")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -540,7 +540,7 @@ func TestCloneGraph(t *testing.T) {
 
 	universeRepo := repositories.NewUniverseRepo(pool)
 	graphRepo := repositories.NewGraphRepo(pool)
-	svc := NewDemoService(pool, universeRepo, graphRepo)
+	svc := NewDemoService(pool, universeRepo, graphRepo, repositories.NewSkillRepo(pool))
 
 	newID, err := svc.CloneUniverse(ctx, demoTemplateUserID, uuid.NewString())
 	if err != nil {
@@ -649,7 +649,7 @@ func TestCloneGraphSkipsUnmappedEdges(t *testing.T) {
 		t.Fatalf("create edge: %v", err)
 	}
 
-	svc := NewDemoService(pool, repositories.NewUniverseRepo(pool), graphRepo)
+	svc := NewDemoService(pool, repositories.NewUniverseRepo(pool), graphRepo, repositories.NewSkillRepo(pool))
 
 	t.Run("empty entityMap skips both endpoints, counted once", func(t *testing.T) {
 		tx, err := pool.Begin(ctx)

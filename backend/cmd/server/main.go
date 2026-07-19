@@ -111,7 +111,7 @@ func main() {
 	workSvc := services.NewWorkService(pool, workRepo)
 	entitySvc := services.NewEntityService(pool, entityRepo, vectorRepo, llmSvc)
 	entitySvc.SetConfidenceThreshold(cfg.EntityConfidenceThreshold)
-	demoSvc := services.NewDemoService(pool, universeRepo, graphRepo)
+	demoSvc := services.NewDemoService(pool, universeRepo, graphRepo, skillRepo)
 
 	// Phase 2a services
 	consolidationSvc := services.NewConsolidationService(consolidationRepo, entityRepo, llmSvc)

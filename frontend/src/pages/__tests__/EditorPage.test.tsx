@@ -10,8 +10,9 @@ vi.mock('../../components/editor/IngestPanel', () => ({ IngestPanel: () => null 
 
 const mockPublish = vi.fn(() => 'feedback-id')
 const mockFeedbackUpdate = vi.fn()
+const mockFeedbackDismiss = vi.fn()
 vi.mock('../../components/feedback', () => ({
-  useFeedback: () => ({ publish: mockPublish, update: mockFeedbackUpdate }),
+  useFeedback: () => ({ publish: mockPublish, update: mockFeedbackUpdate, dismiss: mockFeedbackDismiss }),
 }))
 
 const mockNavigate = vi.fn()
