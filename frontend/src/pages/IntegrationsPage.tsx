@@ -17,8 +17,25 @@ export default function IntegrationsPage() {
   const [copied, setCopied] = useState(false)
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(MCP_ENDPOINT)
-    setCopied(true)
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(MCP_ENDPOINT)
+      setCopied(true)
+      return
+    }
+
+    // navigator.clipboard is undefined outside secure contexts (plain HTTP
+    // on a public IP, e.g. this app's hackathon deployment) — fall back to
+    // the legacy execCommand copy path.
+    const textarea = document.createElement('textarea')
+    textarea.value = MCP_ENDPOINT
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    if (ok) setCopied(true)
   }
 
   return (

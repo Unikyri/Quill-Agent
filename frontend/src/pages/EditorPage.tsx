@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useFeedback } from '../components/feedback'
 import { useEditorStore } from '../stores/editorStore'
 import { useWSStore } from '../stores/wsStore'
+import { randomUUIDCompat } from '../lib/uuid'
 import { useWS } from '../hooks/useWS'
 import { api } from '../lib/api'
 import type { CraftReviewResult, EntityCandidateDTO } from '../lib/types'
@@ -464,7 +465,7 @@ export default function EditorPage() {
 
   const handleCraftReview = useCallback(({ passage }: { passage: string; from: number; to: number }) => {
     if (!chapterId || !workInfo?.id || !universeId || !passage.trim() || typeof sendWS !== 'function') return
-    const requestId = crypto.randomUUID()
+    const requestId = randomUUIDCompat() ?? `craft-${Date.now()}`
     // Do not let an old global transport/analysis error immediately fail a
     // newly submitted craft review.
     if (typeof clearWSError === 'function') clearWSError()
