@@ -180,7 +180,7 @@ flowchart TB
 
 - **Continuity Analyst** and **Plot-Hole Evaluator** run automatically on every submitted paragraph, fanned out from `AnalysisService.processJob` — see [The live analysis pipeline](#the-live-analysis-pipeline) below.
 - **Timeline Validator** runs when a writer creates a timeline event whose chronological position is ambiguous relative to the work's latest chapter; an inconsistent verdict is surfaced as a non-blocking `timeline_warning`, not a hard rejection — the writer still makes the final call, same as every other finding in Quill.
-- **Arbiter** closes the loop the other three don't: without it, a contradiction and a plot-hole finding for the same paragraph reach the writer as two disconnected alerts, even when they describe the same underlying issue. The Arbiter reads both raw finding sets and writes one short synthesis — which one actually matters, and whether two findings are really one.
+- **Arbiter** closes the loop the other three don't: without it, a contradiction and a plot-hole finding for the same paragraph reach the writer as two disconnected alerts, even when they describe the same underlying issue. The Arbiter reads both raw finding sets and writes one short synthesis — which one actually matters, and whether two findings are really one. Its note shows up live in the editor's **Live Analysis** panel, right under the Contradiction section, whenever it actually has something to adjudicate.
 
 None of the four share a tool registry entry that isn't already exposed to the MCP server above, and none run a bespoke reasoning path — they're all the same `RunAgentLoop`, invoked with a different prompt and a different (possibly empty) tool set. That's the whole trick: specialisation through persona and tool access, not four separate codebases.
 
@@ -255,7 +255,7 @@ TEST_DATABASE_URL=postgres://quill:quill_dev_password@localhost:5432/quill?sslmo
   QWEN_API_KEY=your_key go test ./eval/ -run TestMemoryEval -v
 ```
 
-**Measured results from the eval corpus** (small dated corpus, `backend/eval/corpus/saga_gold.json`; reproducible with the command above):
+**Measured results from the eval corpus** — a small, hand-authored corpus (`backend/eval/corpus/saga_gold.json`, 6 gold queries), reproducible with the command above. Six queries is exploratory evidence, not a statistically powered benchmark — the precision below is real but the sample is intentionally small, sized for a fast, deterministic CI check rather than a publishable retrieval study:
 
 | Metric | Result |
 | --- | --- |
@@ -270,7 +270,7 @@ TEST_DATABASE_URL=postgres://quill:quill_dev_password@localhost:5432/quill?sslmo
 | Forgetting — active entities before / after 17 decay ticks | 21 → 15 |
 | Consolidation fidelity (sample entities) | 0.75, 0.25 |
 
-The ablation is the honest finding here: no single pipeline wins outright, vector+graph beats every pipeline alone (including the full fused set) on this corpus, and keyword-only recall is a real, reported zero rather than a hidden failure — that's what makes hybrid recall a design decision instead of a marketing claim.
+The ablation is the honest finding here: no single pipeline wins outright, vector+graph beats every pipeline alone (including the full fused set) on this corpus, and keyword-only recall is a real, reported zero rather than a hidden failure — that's what makes hybrid recall a design decision instead of a marketing claim. Production (`MemoryService.RecallWithQuery`, used by both Story Recall and live-analysis contextual recall) fuses all six pipelines unconditionally rather than switching to whichever combination scored best on this six-query sample — a corpus this small isn't a sound basis for hard-coding a narrower pipeline set into the default path, so the current behaviour is the more defensible one until a larger eval says otherwise.
 
 ---
 
